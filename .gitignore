@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.playwright-cli/
+server/livenote.sqlite3
+server/__pycache__/
+server/data/*
+!server/data/.gitkeep
