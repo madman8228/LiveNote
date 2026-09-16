@@ -36,6 +36,7 @@ export class MediaRecorderEngine implements RecorderEngine {
   private chunkError: Error | null = null
   private stopPromise: Promise<RecordingResult> | null = null
   private chunkHandler: ((chunk: RecorderChunk) => Promise<void> | void) | undefined
+  private stopRequestedAt = 0
 
   constructor(private readonly dependencies: MediaRecorderEngineDependencies = browserDependencies()) {}
 
@@ -92,6 +93,7 @@ export class MediaRecorderEngine implements RecorderEngine {
     this.totalBytes = 0
     this.pendingChunkWrites = Promise.resolve()
     this.chunkError = null
+    this.stopRequestedAt = 0
     this.chunkHandler = options.onChunk
     this.selectedMimeType = recorder.mimeType || requestedMimeType || 'browser-default'
     this._state = 'recording'
@@ -108,12 +110,16 @@ export class MediaRecorderEngine implements RecorderEngine {
         this.chunkCount += 1
         this.totalBytes += event.data.size
         const task = async () => {
-          await this.chunkHandler?.(chunk)
+          try {
+            await this.chunkHandler?.(chunk)
+          } catch (error: unknown) {
+            // Keep the queue alive so a transient failure for one chunk does
+            // not silently discard every later chunk. Stop() reports the
+            // first error after all already-emitted chunks finish processing.
+            if (!this.chunkError) this.chunkError = error instanceof Error ? error : new Error('Chunk 保存失败。')
+          }
         }
-        this.pendingChunkWrites = this.pendingChunkWrites.then(task).catch((error: unknown) => {
-          this.chunkError = error instanceof Error ? error : new Error('Chunk 保存失败。')
-          throw this.chunkError
-        })
+        this.pendingChunkWrites = this.pendingChunkWrites.then(task, task)
       }
     })
 
@@ -142,12 +148,13 @@ export class MediaRecorderEngine implements RecorderEngine {
       return this.stopPromise
     }
 
+    this.stopRequestedAt = performance.now()
     this._state = 'stopping'
     this.stopPromise = new Promise<RecordingResult>((resolve, reject) => {
       recorder.addEventListener('stop', () => {
         void this.pendingChunkWrites.then(() => {
           if (this.chunkError) throw this.chunkError
-          const durationMs = Math.max(0, performance.now() - this.startedAt) + this.sessionElapsedBaseMs
+          const durationMs = Math.max(0, this.stopRequestedAt - this.startedAt) + this.sessionElapsedBaseMs
           this._state = 'ready'
           resolve({ durationMs, chunkCount: this.chunkCount, totalBytes: this.totalBytes })
         }).catch((error: unknown) => {

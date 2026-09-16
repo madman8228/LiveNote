@@ -1,6 +1,7 @@
 import type { ChunkRecord, MarkerRecord, SegmentRecord, SessionRecord } from '../storage/types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
+const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || ''
 
 export interface UploadStateResponse {
   sessionId: string
@@ -13,7 +14,7 @@ export interface UploadStateResponse {
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { Accept: 'application/json', ...(init.headers ?? {}) },
+    headers: { Accept: 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}), ...(init.headers ?? {}) },
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
@@ -23,6 +24,10 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export const ApiClient = {
+  checkHealth() {
+    return requestJson<{ ok: boolean; service: string }>('/health')
+  },
+
   createSession(session: SessionRecord) {
     const payload = { ...session, startedAt: Math.round(session.startedAt), endedAt: session.endedAt === null ? null : Math.round(session.endedAt), durationMs: Math.round(session.durationMs), createdAt: Math.round(session.createdAt), updatedAt: Math.round(session.updatedAt) }
     return requestJson<{ id: string }>(`/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -46,11 +51,19 @@ export const ApiClient = {
       },
     )
   },
-  completeSegment(sessionId: string, segmentId: string) {
-    return requestJson<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/segments/${encodeURIComponent(segmentId)}/complete`, { method: 'POST' })
+  completeSegment(sessionId: string, segmentId: string, expectedChunkCount?: number) {
+    return requestJson<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/segments/${encodeURIComponent(segmentId)}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedChunkCount }),
+    })
   },
-  completeSession(sessionId: string) {
-    return requestJson<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/complete`, { method: 'POST' })
+  completeSession(sessionId: string, expectedChunkCount?: number) {
+    return requestJson<{ ok: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedChunkCount }),
+    })
   },
   uploadMarker(marker: MarkerRecord) {
     const payload = { ...marker, elapsedMs: Math.round(marker.elapsedMs), wallClockMs: Math.round(marker.wallClockMs), createdAt: Math.round(marker.createdAt) }

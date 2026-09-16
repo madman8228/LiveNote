@@ -47,10 +47,11 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .eyebrow.accent { color: var(--accent); }
 .stage-tag { border-left: 1px solid var(--line); color: var(--muted); font-size: 10px; padding-left: 9px; }
 
-.section-block { border-bottom: 1px solid var(--line); padding: 22px 0; }
-.section-heading { align-items: flex-start; margin-bottom: 14px; }
-.section-heading h3 { margin: 6px 0 0; font-size: 18px; font-weight: 520; letter-spacing: -0.04em; }
+.section-block { border-bottom: 1px solid var(--line); padding: 14px 0; }
+.section-heading { align-items: flex-start; margin-bottom: 9px; }
+.section-heading h3 { margin: 3px 0 0; font-size: 16px; line-height: 1.15; font-weight: 520; letter-spacing: -0.04em; }
 .text-button { border: 0; background: none; color: var(--accent); font-size: 12px; padding: 4px 0; }
+.danger-text-button { border: 0; background: none; color: var(--danger); font-size: 12px; padding: 4px 0; }
 .muted-label, .state-label { color: var(--muted); font-size: 11px; }
 .state-label { border: 1px solid var(--line); border-radius: 999px; padding: 6px 9px; text-transform: uppercase; }
 .state-recording { border-color: rgba(201, 242, 124, 0.5); color: var(--accent); }
@@ -140,13 +141,40 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .marker-actions button { min-height: 30px; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--ink); font-size: 11px; padding: 0 9px; }
 .marker-actions button:not(:disabled):active { border-color: var(--accent); color: var(--accent); }
 .marker-actions small { color: var(--muted); font-size: 10px; }
+.marker-list, .marker-history-list { display: grid; gap: 6px; margin-top: 10px; }
+.marker-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
+.marker-item { border-top: 1px solid var(--line); }
+.marker-row { display: grid; grid-template-columns: 40px 42px minmax(0, 1fr) 34px; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 8px 0; font-size: 11px; }
+.marker-row::-webkit-details-marker { display: none; }
+.marker-preview { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.marker-detail { display: grid; gap: 4px; border-left: 2px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.5; margin: 0 0 8px 0; padding-left: 10px; }
+.marker-type { color: var(--accent); }
+.marker-time, .marker-status { color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
+.marker-note { overflow-wrap: anywhere; }
+.marker-history-session { border-top: 1px solid var(--line); padding-top: 10px; }
+.marker-history-session > .empty-state { margin-top: 8px; font-size: 11px; }
 .lifecycle-warning { display: grid; gap: 4px; margin-top: 14px; border-left: 2px solid var(--danger); background: rgba(255, 128, 109, 0.06); color: var(--danger); padding: 10px; }
 .lifecycle-warning strong { font-size: 11px; }
 .lifecycle-warning span, .lifecycle-warning small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 
 .settings-table { border-top: 1px solid var(--line); }
 .settings-row code { max-width: 65%; color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; text-align: right; }
+.settings-summary { margin-bottom: 0; cursor: pointer; list-style: none; }
+.settings-summary::-webkit-details-marker { display: none; }
+.settings-summary::after { content: '+'; color: var(--accent); font-size: 18px; font-weight: 300; line-height: 1; }
+.settings-section[open] .settings-summary::after { content: '−'; }
+.settings-body { padding-top: 4px; }
 .empty-state { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+
+.recorder-section { padding-top: 14px; padding-bottom: 14px; }
+.recorder-section .section-heading { margin-bottom: 9px; }
+.recorder-section .profile-option { padding-top: 11px; padding-bottom: 11px; }
+.recorder-section .profile-option small { margin-top: 3px; }
+.recorder-section .record-control { margin-top: 10px; padding-top: 8px; }
+.recorder-section .level-meter { margin-top: 9px; margin-bottom: 10px; }
+.recorder-section .data-grid { gap: 10px; margin-top: 13px; }
+.recorder-section .status-strip { margin-top: 11px; padding: 8px 0; }
+.recorder-section .marker-actions { margin-top: 10px; }
 
 .result-content { display: grid; gap: 15px; }
 audio { width: 100%; height: 40px; }
@@ -163,12 +191,16 @@ audio { width: 100%; height: 40px; }
 .debug-session { border-bottom: 1px solid var(--line); }
 .debug-session summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; cursor: pointer; list-style-position: outside; font-size: 12px; }
 .debug-session summary span { color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
+.session-restore { display: grid; gap: 8px; padding: 0 0 14px 16px; }
 .debug-segment { border-top: 1px solid var(--line); padding: 16px 0 18px 16px; }
 .debug-line { display: flex; justify-content: space-between; gap: 12px; color: #c8d7da; font-size: 11px; }
 .muted-line { margin-top: 6px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; overflow-wrap: anywhere; }
 .chunk-list { margin: 12px 0; border-top: 1px solid var(--line); }
 .chunk-row { display: grid; grid-template-columns: 36px 70px 62px 1fr 60px; gap: 8px; border-bottom: 1px solid var(--line); padding: 8px 0; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
 .restore-button { min-height: 34px; padding: 0 10px; font-size: 11px; }
+.session-restore > .restore-button { border-color: var(--accent); background: var(--accent); color: #162117; }
+.debug-segment > .restore-button { border-color: rgba(145, 166, 173, 0.65); background: transparent; color: var(--muted); }
+.debug-segment > .restore-button:not(:disabled):hover { border-color: var(--ink); color: var(--ink); }
 .restore-result { display: grid; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 10px; }
 .restore-result audio { width: 100%; height: 36px; }
 .footer-actions { padding-top: 18px; text-align: right; }

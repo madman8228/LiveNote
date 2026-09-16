@@ -5,6 +5,7 @@ export interface RestoredSegment {
   blob: Blob
   chunkCount: number
   totalBytes: number
+  durationMs: number
   mimeType: string
   indexes: number[]
   hasGaps: boolean
@@ -21,6 +22,7 @@ interface SegmentData {
   indexes: number[]
   hasGaps: boolean
   totalBytes: number
+  durationMs: number
 }
 
 async function loadSegmentData(segmentId: string): Promise<SegmentData> {
@@ -36,8 +38,12 @@ async function loadSegmentData(segmentId: string): Promise<SegmentData> {
   const hasGaps = indexes.some((index, position) => index !== position)
   const totalBytes = orderedChunks.reduce((total, chunk) => total + chunk.size, 0)
   const mimeType = segment.mimeType || orderedChunks[0]?.mimeType || 'audio/webm'
+  const wallClockDurationMs = orderedChunks.length
+    ? Math.max(0, orderedChunks[orderedChunks.length - 1].wallClockMs - segment.startedAt)
+    : 0
+  const durationMs = Math.max(0, segment.durationMs, wallClockDurationMs)
 
-  return { chunks: orderedChunks, mimeType, indexes, hasGaps, totalBytes }
+  return { chunks: orderedChunks, mimeType, indexes, hasGaps, totalBytes, durationMs }
 }
 
 export async function restoreSegment(segmentId: string): Promise<RestoredSegment> {
@@ -48,6 +54,7 @@ export async function restoreSegment(segmentId: string): Promise<RestoredSegment
     blob,
     chunkCount: data.chunks.length,
     totalBytes: data.totalBytes,
+    durationMs: data.durationMs,
     mimeType: data.mimeType,
     indexes: data.indexes,
     hasGaps: data.hasGaps,
@@ -93,6 +100,7 @@ export async function createSegmentPlayback(segmentId: string, onUrlReady?: (url
   const base = {
     chunkCount: data.chunks.length,
     totalBytes: data.totalBytes,
+    durationMs: data.durationMs,
     mimeType: data.mimeType,
     indexes: data.indexes,
     hasGaps: data.hasGaps,
@@ -102,6 +110,7 @@ export async function createSegmentPlayback(segmentId: string, onUrlReady?: (url
     const mediaSource = new MediaSource()
     const url = URL.createObjectURL(mediaSource)
     onUrlReady?.(url)
+    let mediaDurationMs = data.durationMs
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -124,6 +133,16 @@ export async function createSegmentPlayback(segmentId: string, onUrlReady?: (url
               await appendBuffer(sourceBuffer, await chunk.blob.arrayBuffer())
             }
 
+            if (mediaSource.readyState === 'open') {
+              const bufferedEnd = sourceBuffer.buffered.length > 0
+                ? sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
+                : 0
+              const durationSeconds = Math.max(data.durationMs / 1000, bufferedEnd)
+              if (durationSeconds > 0) {
+                mediaSource.duration = durationSeconds
+                mediaDurationMs = durationSeconds * 1000
+              }
+            }
             if (mediaSource.readyState === 'open') mediaSource.endOfStream()
             resolve()
           } catch (error) {
@@ -137,7 +156,7 @@ export async function createSegmentPlayback(segmentId: string, onUrlReady?: (url
         else mediaSource.addEventListener('sourceopen', () => void open(), { once: true })
       })
 
-      return { ...base, blob: new Blob(), url, playbackMode: 'media-source' }
+      return { ...base, durationMs: mediaDurationMs, blob: new Blob(), url, playbackMode: 'media-source' }
     } catch {
       URL.revokeObjectURL(url)
     }

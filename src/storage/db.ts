@@ -143,3 +143,11 @@ export async function deleteRecord(storeName: string, id: string): Promise<void>
   transaction.objectStore(storeName).delete(id)
   await transactionDone(transaction)
 }
+
+export async function clearAllData(): Promise<void> {
+  const database = await openDatabase()
+  const storeNames = Object.values(STORE_NAMES)
+  const transaction = database.transaction(storeNames, 'readwrite')
+  for (const storeName of storeNames) transaction.objectStore(storeName).clear()
+  await transactionDone(transaction)
+}

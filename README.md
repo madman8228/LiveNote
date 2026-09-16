@@ -36,7 +36,7 @@ FastAPI 默认监听 `http://0.0.0.0:8000`。Vite 开发服务器会把前端 `/
 
 ## M2 + M3 验收
 
-录音开始后，一个 `MediaRecorder` 会持续运行，并用 `start(30000)` 请求周期性 `dataavailable`。每个有效 Blob 会先写入 IndexedDB，写入成功后才更新页面上的已保存 Chunk 计数。Chunk 的 `wallClockMs` 来自事件发生时刻，`elapsedMs` 使用当前页面的 `performance.now()` 单调计时，并在 Session 恢复时从已保存时长继续。
+录音开始后，一个 `MediaRecorder` 会持续运行，并用约 10 秒的 `start(timeslice)` 请求周期性 `dataavailable`。每个有效 Blob 会先写入 IndexedDB，写入成功后才更新页面上的已保存 Chunk 计数。Chunk 的 `wallClockMs` 来自事件发生时刻，`elapsedMs` 使用当前页面的 `performance.now()` 单调计时，并在 Session 恢复时从已保存时长继续。10 秒只是浏览器的分片请求值，不代表事件一定严格每 10 秒触发。
 
 页面刷新后，如果发现 `RECORDING`、`PAUSED` 或 `FINALIZING` Session，会显示恢复界面。选择继续会保留原 Session 并创建下一个 Segment；选择结束并保存会保留已有 Chunk，并把未正常结束的 Segment 标记为 `INTERRUPTED`。
 
@@ -52,7 +52,9 @@ FastAPI 默认监听 `http://0.0.0.0:8000`。Vite 开发服务器会把前端 `/
 4. 录音几分钟后刷新，确认出现恢复界面；继续后创建 Segment #2。
 5. 在调试区域对完整 Segment 执行重组并回放，检查分片边界是否有缺音、重复或明显空洞。
 
-录音时页面会显示 Wake Lock、服务器、上传队列和生命周期状态。Wake Lock 失败不会停止录音；页面切到后台、系统释放锁或浏览器不支持时，会显示风险提示。服务器不可用时，页面会明确显示“录音仍在本地继续保存”。
+录音时页面会显示 Wake Lock、网络、服务器、上传队列和生命周期状态。Wake Lock 失败不会停止录音；页面切到后台、系统释放锁或浏览器不支持时，会显示风险提示。网络或服务器不可用时，页面会暂停上传重试，但 MediaRecorder 和 IndexedDB 仍继续工作，页面会明确显示“录音继续本地保存”。
+
+开发期通过电脑局域网地址访问时，如果 Android Chrome 因 Wi‑Fi 切换而重新加载或丢弃页面，原来的 MediaRecorder 无法跨页面继续，这是浏览器生命周期限制，不是上传失败。生产构建会注册一个最小离线 App Shell Service Worker，帮助页面在短暂断网后重新打开；已经保存到 IndexedDB 的 Chunk 不会丢失，但重新加载后仍需要按照恢复流程创建新的 Segment。实际长时间录音应使用稳定的 HTTPS 部署地址，并保持页面前台。
 
 ## M4 + M5 结构
 
@@ -71,7 +73,7 @@ PENDING → UPLOADING → UPLOADED
             FAILED → 按退避策略重试
 ```
 
-服务器以 `segmentId + chunkIndex` 为唯一键。重复上传时，SHA256 相同返回成功且 `already_exists=true`；SHA256 不同返回 409，不会创建副本。
+服务器以 `segmentId + chunkIndex` 为唯一键。重复上传时，SHA256 相同返回成功且 `already_exists=true`；SHA256 不同返回 409，不会创建副本。Session/Segment 收尾会携带预期 Chunk 数量，服务器会校验数量和 Segment index 是否连续；本地还有待上传或失败 Chunk 时不会标记服务器完成，网络恢复后上传队列会再次尝试收尾。
 
 ## 测试记录模板
 

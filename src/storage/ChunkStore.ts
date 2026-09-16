@@ -24,6 +24,11 @@ export const ChunkStore = {
       .filter((chunk) => chunk.uploadStatus === 'PENDING' || chunk.uploadStatus === 'FAILED')
       .sort((a, b) => a.sessionId.localeCompare(b.sessionId) || a.segmentId.localeCompare(b.segmentId) || a.index - b.index))
   },
+  listUploading() {
+    return getAllRecords<ChunkRecord>(STORE_NAMES.chunks).then((chunks) => (
+      chunks.map(normalizeChunk).filter((chunk) => chunk.uploadStatus === 'UPLOADING')
+    ))
+  },
   put(chunk: ChunkRecord) {
     return putRecord(STORE_NAMES.chunks, chunk)
   },

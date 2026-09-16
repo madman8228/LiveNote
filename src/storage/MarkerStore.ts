@@ -18,4 +18,9 @@ export const MarkerStore = {
       .filter((marker) => marker.uploadStatus === 'PENDING' || marker.uploadStatus === 'FAILED')
       .sort((a, b) => a.createdAt - b.createdAt))
   },
+  listUploading() {
+    return getAllRecords<MarkerRecord>(STORE_NAMES.markers).then((markers) => (
+      markers.filter((marker) => marker.uploadStatus === 'UPLOADING')
+    ))
+  },
 }

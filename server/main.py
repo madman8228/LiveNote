@@ -3,18 +3,24 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 SERVER_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get('LIVENOTE_DATA_DIR', SERVER_DIR / 'data'))
 DB_PATH = Path(os.environ.get('LIVENOTE_DB_PATH', SERVER_DIR / 'livenote.sqlite3'))
+MAX_CHUNK_BYTES = int(os.environ.get('LIVENOTE_MAX_CHUNK_BYTES', str(25 * 1024 * 1024)))
+API_KEY = os.environ.get('LIVENOTE_API_KEY', '')
+IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
 
 def now_ms() -> int:
@@ -83,47 +89,65 @@ def init_db() -> None:
 
 
 class SessionPayload(BaseModel):
-    id: str
+    id: str = Field(min_length=1, max_length=128)
     title: str
     startedAt: int
     endedAt: int | None = None
     status: str
-    durationMs: int = 0
+    durationMs: int = Field(default=0, ge=0)
     createdAt: int
     updatedAt: int
 
 
 class SegmentPayload(BaseModel):
-    id: str
-    sessionId: str
-    index: int
+    id: str = Field(min_length=1, max_length=128)
+    sessionId: str = Field(min_length=1, max_length=128)
+    index: int = Field(ge=1)
     startedAt: int
     endedAt: int | None = None
     mimeType: str = ''
     mediaSettings: dict = Field(default_factory=dict)
     status: str
-    durationMs: int = 0
+    durationMs: int = Field(default=0, ge=0)
 
 
 class MarkerPayload(BaseModel):
-    id: str
-    sessionId: str
+    id: str = Field(min_length=1, max_length=128)
+    sessionId: str = Field(min_length=1, max_length=128)
     type: str
-    elapsedMs: int
-    wallClockMs: int
+    elapsedMs: int = Field(ge=0)
+    wallClockMs: int = Field(ge=0)
     note: str = ''
     createdAt: int
+
+
+class CompletionPayload(BaseModel):
+    expectedChunkCount: int | None = Field(default=None, ge=0)
+
+
+def validate_identifier(value: str, label: str) -> None:
+    if not IDENTIFIER_PATTERN.fullmatch(value):
+        raise HTTPException(status_code=400, detail=f'{label} 格式无效')
 
 
 init_db()
 app = FastAPI(title='LiveNote API', version='0.1.0')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['*'],
+    allow_origins=[origin.strip() for origin in os.environ.get('LIVENOTE_CORS_ORIGINS', 'http://localhost:5173,https://localhost:5173').split(',') if origin.strip()],
     allow_credentials=False,
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+
+@app.middleware('http')
+async def api_key_middleware(request: Request, call_next):
+    if API_KEY and request.url.path.startswith('/api/v1/'):
+        provided = request.headers.get('x-api-key', '')
+        if not secrets.compare_digest(provided, API_KEY):
+            return JSONResponse(status_code=401, content={'detail': '缺少有效 API Key'})
+    return await call_next(request)
 
 
 @app.get('/health')
@@ -131,8 +155,14 @@ def health() -> dict:
     return {'ok': True, 'service': 'livenote-api'}
 
 
+@app.get('/api/v1/health')
+def api_health() -> dict:
+    return health()
+
+
 @app.post('/api/v1/sessions')
 def create_session(payload: SessionPayload) -> dict:
+    validate_identifier(payload.id, 'Session ID')
     with connect() as connection:
         connection.execute(
             '''INSERT INTO sessions(id, title, started_at, ended_at, status, duration_ms, created_at, updated_at)
@@ -146,6 +176,8 @@ def create_session(payload: SessionPayload) -> dict:
 
 @app.post('/api/v1/sessions/{session_id}/segments')
 def create_segment(session_id: str, payload: SegmentPayload) -> dict:
+    validate_identifier(session_id, 'Session ID')
+    validate_identifier(payload.id, 'Segment ID')
     if payload.sessionId != session_id:
         raise HTTPException(status_code=400, detail='sessionId 不匹配')
     with connect() as connection:
@@ -171,14 +203,19 @@ async def upload_chunk(
     x_chunk_size: int | None = Header(default=None),
     x_chunk_elapsed_ms: int | None = Header(default=None),
 ) -> dict:
+    validate_identifier(session_id, 'Session ID')
+    validate_identifier(segment_id, 'Segment ID')
+    if chunk_index < 0:
+        raise HTTPException(status_code=400, detail='Chunk index 无效')
     if not x_chunk_sha256 or x_chunk_size is None or x_chunk_elapsed_ms is None:
         raise HTTPException(status_code=400, detail='缺少 Chunk 校验 Header')
-    body = await request.body()
-    if len(body) != x_chunk_size:
-        raise HTTPException(status_code=400, detail='Chunk size 不一致')
-    actual_sha256 = hashlib.sha256(body).hexdigest()
-    if actual_sha256 != x_chunk_sha256:
-        raise HTTPException(status_code=400, detail='Chunk SHA256 不一致')
+    if x_chunk_size <= 0 or x_chunk_size > MAX_CHUNK_BYTES:
+        raise HTTPException(status_code=413, detail=f'Chunk 超出大小限制（最大 {MAX_CHUNK_BYTES} bytes）')
+    content_length = request.headers.get('content-length')
+    if content_length and int(content_length) > MAX_CHUNK_BYTES:
+        raise HTTPException(status_code=413, detail=f'Chunk 超出大小限制（最大 {MAX_CHUNK_BYTES} bytes）')
+    if x_chunk_elapsed_ms < 0:
+        raise HTTPException(status_code=400, detail='Chunk elapsedMs 无效')
 
     with connect() as connection:
         session = connection.execute('SELECT 1 FROM sessions WHERE id = ?', (session_id,)).fetchone()
@@ -187,30 +224,57 @@ async def upload_chunk(
             raise HTTPException(status_code=404, detail='Session 或 Segment 不存在')
 
         existing = connection.execute('SELECT size, sha256, local_path FROM chunks WHERE segment_id = ? AND chunk_index = ?', (segment_id, chunk_index)).fetchone()
-        if existing is not None:
-            if existing['size'] == len(body) and existing['sha256'] == actual_sha256:
-                return {'ok': True, 'already_exists': True, 'verified': True}
-            raise HTTPException(status_code=409, detail='相同 Segment/Chunk index 的 SHA256 不一致')
-
-        mime_type = request.headers.get('content-type', 'application/octet-stream')
+        hasher = hashlib.sha256()
+        body_size = 0
         relative_path = Path('sessions') / session_id / f"segment_{segment['segment_index']}" / 'chunks' / f'{chunk_index:06d}.bin'
         absolute_path = DATA_DIR / relative_path
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = absolute_path.with_name(f'.{absolute_path.name}.{uuid.uuid4().hex}.tmp')
-        temporary_path.write_bytes(body)
-        temporary_path.replace(absolute_path)
-        received_at = now_ms()
-        connection.execute(
-            '''INSERT INTO chunks(session_id, segment_id, chunk_index, size, sha256, mime_type,
-               elapsed_ms, created_at, received_at, local_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (session_id, segment_id, chunk_index, len(body), actual_sha256, mime_type, x_chunk_elapsed_ms, received_at, received_at, str(relative_path)),
-        )
+        try:
+            with temporary_path.open('wb') as output:
+                async for part in request.stream():
+                    body_size += len(part)
+                    if body_size > MAX_CHUNK_BYTES:
+                        raise HTTPException(status_code=413, detail=f'Chunk 超出大小限制（最大 {MAX_CHUNK_BYTES} bytes）')
+                    hasher.update(part)
+                    output.write(part)
+            if body_size != x_chunk_size:
+                raise HTTPException(status_code=400, detail='Chunk size 不一致')
+            actual_sha256 = hasher.hexdigest()
+            if actual_sha256 != x_chunk_sha256:
+                raise HTTPException(status_code=400, detail='Chunk SHA256 不一致')
+            if existing is not None:
+                if existing['size'] == body_size and existing['sha256'] == actual_sha256:
+                    temporary_path.unlink(missing_ok=True)
+                    return {'ok': True, 'already_exists': True, 'verified': True}
+                raise HTTPException(status_code=409, detail='相同 Segment/Chunk index 的 SHA256 不一致')
+
+            temporary_path.replace(absolute_path)
+            received_at = now_ms()
+            mime_type = request.headers.get('content-type', 'application/octet-stream')
+            connection.execute(
+                '''INSERT INTO chunks(session_id, segment_id, chunk_index, size, sha256, mime_type,
+                   elapsed_ms, created_at, received_at, local_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (session_id, segment_id, chunk_index, body_size, actual_sha256, mime_type, x_chunk_elapsed_ms, received_at, received_at, str(relative_path)),
+            )
+        except Exception:
+            if temporary_path.exists(): temporary_path.unlink()
+            raise
     return {'ok': True, 'already_exists': False, 'verified': True}
 
 
 @app.post('/api/v1/sessions/{session_id}/segments/{segment_id}/complete')
-def complete_segment(session_id: str, segment_id: str) -> dict:
+def complete_segment(session_id: str, segment_id: str, payload: CompletionPayload | None = None) -> dict:
+    validate_identifier(session_id, 'Session ID')
+    validate_identifier(segment_id, 'Segment ID')
     with connect() as connection:
+        segment = connection.execute('SELECT id FROM segments WHERE id = ? AND session_id = ?', (segment_id, session_id)).fetchone()
+        if segment is None:
+            raise HTTPException(status_code=404, detail='Segment 不存在')
+        indexes = [row['chunk_index'] for row in connection.execute('SELECT chunk_index FROM chunks WHERE segment_id = ? ORDER BY chunk_index', (segment_id,)).fetchall()]
+        expected = payload.expectedChunkCount if payload else None
+        if expected is not None and (len(indexes) != expected or indexes != list(range(expected))):
+            raise HTTPException(status_code=409, detail=f'Segment Chunk 不完整：收到 {len(indexes)}，预期 {expected}')
         result = connection.execute('UPDATE segments SET status = ?, ended_at = COALESCE(ended_at, ?) WHERE id = ? AND session_id = ?', ('COMPLETED', now_ms(), segment_id, session_id))
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail='Segment 不存在')
@@ -218,8 +282,15 @@ def complete_segment(session_id: str, segment_id: str) -> dict:
 
 
 @app.post('/api/v1/sessions/{session_id}/complete')
-def complete_session(session_id: str) -> dict:
+def complete_session(session_id: str, payload: CompletionPayload | None = None) -> dict:
+    validate_identifier(session_id, 'Session ID')
     with connect() as connection:
+        if connection.execute('SELECT 1 FROM sessions WHERE id = ?', (session_id,)).fetchone() is None:
+            raise HTTPException(status_code=404, detail='Session 不存在')
+        actual_count = connection.execute('SELECT COUNT(*) AS count FROM chunks WHERE session_id = ?', (session_id,)).fetchone()['count']
+        expected = payload.expectedChunkCount if payload else None
+        if expected is not None and actual_count != expected:
+            raise HTTPException(status_code=409, detail=f'Session Chunk 不完整：收到 {actual_count}，预期 {expected}')
         result = connection.execute('UPDATE sessions SET status = ?, ended_at = COALESCE(ended_at, ?), updated_at = ? WHERE id = ?', ('COMPLETED', now_ms(), now_ms(), session_id))
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail='Session 不存在')
@@ -228,6 +299,8 @@ def complete_session(session_id: str) -> dict:
 
 @app.post('/api/v1/sessions/{session_id}/markers')
 def create_marker(session_id: str, payload: MarkerPayload) -> dict:
+    validate_identifier(session_id, 'Session ID')
+    validate_identifier(payload.id, 'Marker ID')
     if payload.sessionId != session_id:
         raise HTTPException(status_code=400, detail='sessionId 不匹配')
     with connect() as connection:
@@ -245,6 +318,7 @@ def create_marker(session_id: str, payload: MarkerPayload) -> dict:
 
 @app.get('/api/v1/sessions/{session_id}/upload-state')
 def upload_state(session_id: str) -> dict:
+    validate_identifier(session_id, 'Session ID')
     with connect() as connection:
         if connection.execute('SELECT 1 FROM sessions WHERE id = ?', (session_id,)).fetchone() is None:
             raise HTTPException(status_code=404, detail='Session 不存在')
