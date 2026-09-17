@@ -113,6 +113,16 @@ server/data/processed/sessions/{sessionId}/report.json
 
 服务端提供 `DELETE /api/v1/sessions/{sessionId}`，会删除该 Session 的数据库记录、Chunk 文件、重建音频、ASR/报告结果和处理任务状态。正在处理的 Session 会返回 `409`，避免后台任务和清理操作竞争。该接口受 API Key 保护；手机端服务器在线时，单个 Session 删除会同步清理服务器副本。
 
+## 数据备份
+
+可以在暂停录音上传后执行本地备份：
+
+```powershell
+python server/backup.py --destination D:\LiveNoteBackups
+```
+
+备份目录包含 SQLite 数据库、`data/` 下的音频和处理结果，以及 `manifest.json`。备份工具使用 SQLite 原生 backup API；数据库和文件目录仍不是同一时刻快照，生产环境应在维护窗口执行，或使用文件系统快照。备份目录不要放在 `LIVENOTE_DATA_DIR` 内部。
+
 ## M9 后台处理任务
 
 长音频不建议让手机页面一直等待同步请求。现在可以创建一个本地后台处理任务：
