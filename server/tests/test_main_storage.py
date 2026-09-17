@@ -201,6 +201,18 @@ class MainStorageTests(unittest.TestCase):
         self.assertEqual(restored['id'], 'job-restore')
         self.assertEqual(restored['stage'], 'ASR')
 
+    def test_duplicate_processing_requests_share_one_active_job(self) -> None:
+        from server import jobs
+
+        data_dir = _ROOT / 'duplicate-job-data'
+        db_path = _ROOT / 'duplicate-job.sqlite3'
+        with patch.object(jobs._executor, 'submit') as submit:
+            first = jobs.create_job(data_dir, db_path, 'duplicate-job-session', 'medium', 'zh')
+            second = jobs.create_job(data_dir, db_path, 'duplicate-job-session', 'medium', 'zh')
+
+        self.assertEqual(first['id'], second['id'])
+        self.assertEqual(submit.call_count, 1)
+
     def test_processing_rejects_a_partial_upload(self) -> None:
         session_id = 'partial-processing-session'
         segment_id = 'partial-processing-segment'

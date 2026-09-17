@@ -139,25 +139,29 @@ def _now_ms() -> int:
 
 
 def create_job(data_dir: Path, db_path: Path, session_id: str, model: str, language: str) -> dict[str, Any]:
-    existing = find_active_job(data_dir, session_id)
-    if existing is not None:
-        return existing
-    job_id = f'job-{uuid.uuid4()}'
-    now = _now_ms()
-    state = {
-        'id': job_id,
-        'sessionId': session_id,
-        'status': 'QUEUED',
-        'stage': 'QUEUED',
-        'message': '任务已排队。',
-        'model': model,
-        'language': language,
-        'createdAt': now,
-        'updatedAt': now,
-    }
-    _write_job(data_dir, state)
-    _executor.submit(_run_job, data_dir, db_path, job_id, session_id, model, language)
-    return state
+    # The check and creation must be atomic from the app's point of view.
+    # Otherwise two rapid clicks can both observe no active job and enqueue
+    # duplicate reconstruction/ASR work for the same Session.
+    with _lock:
+        existing = find_active_job(data_dir, session_id)
+        if existing is not None:
+            return existing
+        job_id = f'job-{uuid.uuid4()}'
+        now = _now_ms()
+        state = {
+            'id': job_id,
+            'sessionId': session_id,
+            'status': 'QUEUED',
+            'stage': 'QUEUED',
+            'message': '任务已排队。',
+            'model': model,
+            'language': language,
+            'createdAt': now,
+            'updatedAt': now,
+        }
+        _write_job(data_dir, state)
+        _executor.submit(_run_job, data_dir, db_path, job_id, session_id, model, language)
+        return state
 
 
 def recover_jobs(data_dir: Path, db_path: Path) -> int:
