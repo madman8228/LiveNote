@@ -322,6 +322,9 @@ class MainStorageTests(unittest.TestCase):
                 ).status_code, 200)
 
         self.assertEqual(client.post(f'/api/v1/sessions/{session_id}/complete', json={'expectedChunkCount': 2}).status_code, 200)
+        segment_audio = client.get(f'/api/v1/sessions/{session_id}/segments/real-webm-segment-1/audio')
+        self.assertEqual(segment_audio.status_code, 200, segment_audio.text)
+        self.assertGreater(len(segment_audio.content), 0)
         audio = client.get(f'/api/v1/sessions/{session_id}/audio')
         self.assertEqual(audio.status_code, 200, audio.text)
         self.assertGreater(len(audio.content), 0)
