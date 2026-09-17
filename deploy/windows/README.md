@@ -28,6 +28,14 @@
 
 如果 8000 已被占用，脚本只显示 PID 并退出。确认确实是旧 LiveNote API 后，再由操作者手动停止该 PID，然后重新执行启动脚本。
 
+也可以使用带有显式确认开关的重启脚本。它只会终止命令行中明确包含 `server/main.py` 的进程；如果端口属于其他程序，脚本会拒绝操作：
+
+```powershell
+.\deploy\windows\Restart-LiveNoteApi.ps1 -ConfirmRestart
+```
+
+没有 `-ConfirmRestart` 时，脚本不会停止任何进程。
+
 ## Windows 备份
 
 暂停录音上传后，可把数据库、音频和处理结果备份到独立目录：
