@@ -57,3 +57,21 @@
 ```
 
 备份目录不要放在 `server\data` 内部；脚本会拒绝这种路径。
+
+恢复前先只校验备份：
+
+```powershell
+.\deploy\windows\Restore-LiveNoteData.ps1 -Backup D:\LiveNoteBackups\livenote-... -VerifyOnly
+```
+
+恢复到新的空目录时，不需要覆盖开关：
+
+```powershell
+.\deploy\windows\Restore-LiveNoteData.ps1 `
+  -Backup D:\LiveNoteBackups\livenote-... `
+  -DataDirectory D:\LiveNoteRestore\data `
+  -DatabasePath D:\LiveNoteRestore\livenote.sqlite3
+```
+
+如果确认替换现有目标，必须显式加 `-Replace`。旧数据库和数据目录会保留为
+`before-restore` 副本，便于回滚；恢复前仍建议暂停 API 和录音上传。

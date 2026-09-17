@@ -50,3 +50,5 @@ LIVENOTE_WHISPER_CACHE=/var/lib/livenote/models
 5. 再进行长时间录音。
 
 正式运行前还应设置定期备份。Windows 本机可在暂停上传后执行 `python server/backup.py --destination D:\LiveNoteBackups`；Linux 环境建议由定时任务调用同一脚本，并把备份目录放在独立磁盘或远程备份位置。
+
+备份可用 `python server/restore.py --backup <备份目录> --verify-only` 校验；恢复到新目录时指定 `--data-dir` 和 `--db-path`，替换现有数据必须显式加入 `--replace`。
