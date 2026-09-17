@@ -99,7 +99,12 @@ export class UploadQueue {
       await this.refreshSnapshot()
       return
     }
-    if (this.snapshot.serverOnline === false) {
+    // A reachable but incompatible API must be treated as a hard pause. The
+    // old API can answer health checks successfully while rejecting the
+    // current session/segment contract; retrying every local Chunk against it
+    // only creates FAILED noise and can obscure the real restart requirement.
+    if (this.snapshot.serverCompatible === null) await this.refreshServerHealth()
+    if (this.snapshot.serverOnline === false || this.snapshot.serverCompatible === false) {
       await this.refreshSnapshot()
       return
     }
@@ -153,6 +158,10 @@ export class UploadQueue {
       const health = await ApiClient.checkHealth()
       const compatible = health.storageSchema === 2 && Boolean(health.capabilities)
       this.updateSnapshot({ serverOnline: true, serverCompatible: compatible, serverCapabilities: health.capabilities ?? null, lastError: compatible ? '' : '服务器 API 版本过旧，请重启 8000 服务后再进行处理。' })
+      if (!compatible) {
+        await this.refreshSnapshot()
+        return
+      }
       await this.recoverInFlightUploads()
       const sessions = await SessionStore.list()
       for (const session of sessions) {

@@ -8,6 +8,12 @@
 .\deploy\windows\Check-LiveNoteApi.ps1
 ```
 
+生产环境启用了 API Key 时，把 Key 只通过参数临时传入，不要写入仓库：
+
+```powershell
+.\deploy\windows\Check-LiveNoteApi.ps1 -ApiKey $env:LIVENOTE_API_KEY
+```
+
 如果返回的 JSON 没有 `storageSchema: 2` 和 `capabilities`，说明 8000 仍运行旧服务。
 
 ## 启动当前代码

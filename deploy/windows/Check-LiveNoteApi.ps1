@@ -1,10 +1,13 @@
 param(
-  [int]$Port = 8000
+  [int]$Port = 8000,
+  [string]$ApiKey = ''
 )
 
 $url = "http://127.0.0.1:$Port/api/v1/health"
 try {
-  $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+  $requestHeaders = @{}
+  if ($ApiKey) { $requestHeaders['X-API-Key'] = $ApiKey }
+  $response = Invoke-WebRequest -Uri $url -Headers $requestHeaders -UseBasicParsing -TimeoutSec 5
   $health = $response.Content | ConvertFrom-Json
 } catch {
   throw "无法访问 $url：$($_.Exception.Message)"
