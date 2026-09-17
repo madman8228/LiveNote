@@ -13,9 +13,9 @@
 - [x] 无 LLM 时明确返回本地抽取式草稿
 - [x] OpenAI-compatible LLM 请求、长文本分段合并和 JSON 归一化测试
 - [x] Session 删除、诊断资料上传、API Key 保护
-- [x] SQLite + 音频/结果目录本地备份工具
+- [x] SQLite + 音频/结果目录本地备份、完整性校验和安全恢复工具
 - [x] PWA manifest、最小 Service Worker 和安装引导
-- [x] 后端回归测试：26 项全部通过
+- [x] 后端回归测试：31 项全部通过
 - [x] `python -m compileall -q server`、`python -m pip check` 通过
 - [x] npm 高危漏洞检查：0
 
@@ -55,5 +55,5 @@ https://电脑局域网IP:5173/
 
 - 必须明确授权后重启旧 8000 API。
 - 必须配置 `LIVENOTE_LLM_BASE_URL`、`LIVENOTE_LLM_MODEL`，以及远程服务所需的 `LIVENOTE_LLM_API_KEY`，才能得到真正语义总结。
-- 必须提供正式域名、HTTPS 证书、数据目录权限和异地备份位置。
+- 必须提供正式域名、HTTPS 证书、数据目录权限和异地备份位置，并在正式环境完成一次恢复演练。
 - 说话人识别、账号体系、云对象存储和生产级外部任务队列仍属于后续范围。

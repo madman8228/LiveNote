@@ -123,6 +123,14 @@ python server/backup.py --destination D:\LiveNoteBackups
 
 备份目录包含 SQLite 数据库、`data/` 下的音频和处理结果，以及 `manifest.json`。备份工具使用 SQLite 原生 backup API；数据库和文件目录仍不是同一时刻快照，生产环境应在维护窗口执行，或使用文件系统快照。备份目录不要放在 `LIVENOTE_DATA_DIR` 内部。
 
+恢复前可先校验备份：
+
+```powershell
+python server/restore.py --backup D:\LiveNoteBackups\livenote-... --verify-only
+```
+
+恢复到新目录时指定 `--data-dir` 和 `--db-path`；默认不覆盖已有目标。确认替换时使用 `--replace`，旧目标会保留为 `before-restore` 副本，便于回滚。恢复前应暂停 API 和录音上传。
+
 ## M9 后台处理任务
 
 长音频不建议让手机页面一直等待同步请求。现在可以创建一个本地后台处理任务：
