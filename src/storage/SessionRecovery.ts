@@ -14,7 +14,7 @@ export interface RestoredSession {
 
 export interface SessionPlayback extends RestoredSession {
   url: string
-  playbackMode: 'media-source' | 'blob-fallback'
+  playbackMode: 'media-source' | 'blob-fallback' | 'server-ffmpeg'
 }
 
 interface SessionData {
@@ -42,7 +42,9 @@ async function loadSessionData(sessionId: string): Promise<SessionData> {
   const mimeType = segments.find((segment) => segment.mimeType)?.mimeType
     || orderedChunks[0]?.mimeType
     || 'audio/webm'
-  const hasGaps = segmentChunks.some(({ chunks }) => chunks.some((chunk, index) => chunk.index !== index))
+  const hasSegmentGaps = segments.some((segment, index) => segment.index !== index + 1)
+  const hasChunkGaps = segmentChunks.some(({ chunks }) => chunks.some((chunk, index) => chunk.index !== index))
+  const hasGaps = hasSegmentGaps || hasChunkGaps
   const totalBytes = orderedChunks.reduce((total, chunk) => total + chunk.size, 0)
   const chunkDurationMs = orderedChunks.reduce((max, chunk) => Math.max(max, chunk.elapsedMs), 0)
   const durationMs = Math.max(session.durationMs, chunkDurationMs)

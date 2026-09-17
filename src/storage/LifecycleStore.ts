@@ -1,4 +1,4 @@
-import { getAllByIndex, putRecord, STORE_NAMES } from './db'
+import { deleteRecord, getAllByIndex, putRecord, STORE_NAMES } from './db'
 import type { LifecycleEventRecord } from './types'
 
 export const LifecycleStore = {
@@ -9,5 +9,8 @@ export const LifecycleStore = {
   },
   put(event: LifecycleEventRecord) {
     return putRecord(STORE_NAMES.lifecycleEvents, event)
+  },
+  delete(id: string) {
+    return deleteRecord(STORE_NAMES.lifecycleEvents, id)
   },
 }

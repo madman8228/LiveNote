@@ -36,6 +36,8 @@ export class MediaRecorderEngine implements RecorderEngine {
   private chunkError: Error | null = null
   private stopPromise: Promise<RecordingResult> | null = null
   private chunkHandler: ((chunk: RecorderChunk) => Promise<void> | void) | undefined
+  private chunkErrorHandler: ((error: Error) => void) | undefined
+  private recorderErrorHandler: ((error: Error) => void) | undefined
   private stopRequestedAt = 0
 
   constructor(private readonly dependencies: MediaRecorderEngineDependencies = browserDependencies()) {}
@@ -95,6 +97,8 @@ export class MediaRecorderEngine implements RecorderEngine {
     this.chunkError = null
     this.stopRequestedAt = 0
     this.chunkHandler = options.onChunk
+    this.chunkErrorHandler = options.onChunkError
+    this.recorderErrorHandler = options.onRecorderError
     this.selectedMimeType = recorder.mimeType || requestedMimeType || 'browser-default'
     this._state = 'recording'
 
@@ -117,6 +121,7 @@ export class MediaRecorderEngine implements RecorderEngine {
             // not silently discard every later chunk. Stop() reports the
             // first error after all already-emitted chunks finish processing.
             if (!this.chunkError) this.chunkError = error instanceof Error ? error : new Error('Chunk 保存失败。')
+            try { this.chunkErrorHandler?.(this.chunkError) } catch { /* Error reporting must not break the write queue. */ }
           }
         }
         this.pendingChunkWrites = this.pendingChunkWrites.then(task, task)
@@ -124,7 +129,11 @@ export class MediaRecorderEngine implements RecorderEngine {
     })
 
     recorder.addEventListener('error', () => {
+      const error = new Error('MediaRecorder 发生错误，当前录音已中断。')
       this._state = 'error'
+      if (!this.stopPromise) {
+        try { this.recorderErrorHandler?.(error) } catch { /* Error recovery must not break MediaRecorder events. */ }
+      }
     })
 
     recorder.start(options.timesliceMs ?? 30_000)
@@ -191,6 +200,8 @@ export class MediaRecorderEngine implements RecorderEngine {
     this.recorder = null
     this.stream = null
     this.stopPromise = null
+    this.chunkErrorHandler = undefined
+    this.recorderErrorHandler = undefined
     if (this._state !== 'error') {
       this._state = 'idle'
     }

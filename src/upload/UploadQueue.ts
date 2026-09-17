@@ -4,11 +4,13 @@ import { SegmentStore } from '../storage/SegmentStore'
 import { SessionStore } from '../storage/SessionStore'
 import { sha256Blob } from '../storage/sha256'
 import type { ChunkRecord, MarkerRecord } from '../storage/types'
-import { ApiClient } from './ApiClient'
+import { ApiClient, ApiRequestError, type ServerCapabilities } from './ApiClient'
 import { canRetryNow } from './RetryPolicy'
 
 export interface UploadQueueSnapshot {
   serverOnline: boolean | null
+  serverCompatible: boolean | null
+  serverCapabilities: ServerCapabilities | null
   isUploading: boolean
   total: number
   uploaded: number
@@ -21,6 +23,8 @@ export type UploadQueueListener = (snapshot: UploadQueueSnapshot) => void
 
 const INITIAL_SNAPSHOT: UploadQueueSnapshot = {
   serverOnline: null,
+  serverCompatible: null,
+  serverCapabilities: null,
   isUploading: false,
   total: 0,
   uploaded: 0,
@@ -32,7 +36,7 @@ const INITIAL_SNAPSHOT: UploadQueueSnapshot = {
 function isTransientNetworkError(error: unknown): boolean {
   if (error instanceof TypeError) return true
   if (!(error instanceof Error)) return false
-  return /failed to fetch|networkerror|load failed|fetch failed/i.test(error.message)
+  return /failed to fetch|networkerror|load failed|fetch failed|请求超时|服务器请求失败 \((408|429|5\d\d)\)/i.test(error.message)
 }
 
 export class UploadQueue {
@@ -40,6 +44,7 @@ export class UploadQueue {
   private flushPromise: Promise<void> | null = null
   private started = false
   private retryTimer: number | null = null
+  private healthTimer: number | null = null
   private snapshot: UploadQueueSnapshot = { ...INITIAL_SNAPSHOT }
   private readonly listeners = new Set<UploadQueueListener>()
 
@@ -54,6 +59,8 @@ export class UploadQueue {
     this.started = true
     this.updateSnapshot({
       serverOnline: navigator.onLine ? this.snapshot.serverOnline : false,
+      serverCompatible: navigator.onLine ? this.snapshot.serverCompatible : null,
+      serverCapabilities: navigator.onLine ? this.snapshot.serverCapabilities : null,
       lastError: navigator.onLine ? this.snapshot.lastError : '网络已断开，上传暂停；录音继续本地保存。',
     })
     window.addEventListener('online', this.handleOnline)
@@ -63,6 +70,9 @@ export class UploadQueue {
       if (this.snapshot.serverOnline !== true) void this.reconcileAll().then(() => this.flush())
       else void this.flush()
     }, 5_000)
+    this.healthTimer = window.setInterval(() => {
+      if (navigator.onLine) void this.refreshServerHealth()
+    }, 30_000)
     if (navigator.onLine) {
       void this.reconcileAll().then(() => this.flush())
     }
@@ -74,6 +84,8 @@ export class UploadQueue {
     window.removeEventListener('offline', this.handleOffline)
     if (this.retryTimer !== null) window.clearInterval(this.retryTimer)
     this.retryTimer = null
+    if (this.healthTimer !== null) window.clearInterval(this.healthTimer)
+    this.healthTimer = null
   }
 
   kick(): void {
@@ -83,7 +95,7 @@ export class UploadQueue {
   async flush(): Promise<void> {
     if (this.flushPromise) return this.flushPromise
     if (!navigator.onLine) {
-      this.updateSnapshot({ serverOnline: false, lastError: '网络已断开，上传暂停；录音继续本地保存。' })
+      this.updateSnapshot({ serverOnline: false, serverCompatible: null, serverCapabilities: null, lastError: '网络已断开，上传暂停；录音继续本地保存。' })
       await this.refreshSnapshot()
       return
     }
@@ -95,8 +107,13 @@ export class UploadQueue {
     const promise = (async () => {
       this.updateSnapshot({ isUploading: true })
       try {
-        const chunks = await ChunkStore.listPendingOrFailed()
-        for (const chunk of chunks) {
+        const chunkMetadata = await ChunkStore.listPendingOrFailedMetadata()
+        for (const metadata of chunkMetadata) {
+          if (metadata.uploadStatus === 'FAILED' && !canRetryNow(metadata.retryCount, metadata.lastUploadAttemptAt)) continue
+          // Keep only one audio Blob in memory while recovering a large
+          // offline queue. The metadata query above is intentionally Blob-free.
+          const chunk = await ChunkStore.get(metadata.id)
+          if (!chunk || !['PENDING', 'FAILED'].includes(chunk.uploadStatus)) continue
           if (chunk.uploadStatus === 'FAILED' && !canRetryNow(chunk.retryCount, chunk.lastUploadAttemptAt)) continue
           try {
             await this.uploadChunk(chunk)
@@ -129,12 +146,13 @@ export class UploadQueue {
 
   async reconcileAll(): Promise<void> {
     if (!navigator.onLine) {
-      this.updateSnapshot({ serverOnline: false, lastError: '网络已断开，上传暂停；录音继续本地保存。' })
+      this.updateSnapshot({ serverOnline: false, serverCompatible: null, serverCapabilities: null, lastError: '网络已断开，上传暂停；录音继续本地保存。' })
       return
     }
     try {
-      await ApiClient.checkHealth()
-      this.updateSnapshot({ serverOnline: true, lastError: '' })
+      const health = await ApiClient.checkHealth()
+      const compatible = health.storageSchema === 2 && Boolean(health.capabilities)
+      this.updateSnapshot({ serverOnline: true, serverCompatible: compatible, serverCapabilities: health.capabilities ?? null, lastError: compatible ? '' : '服务器 API 版本过旧，请重启 8000 服务后再进行处理。' })
       await this.recoverInFlightUploads()
       const sessions = await SessionStore.list()
       for (const session of sessions) {
@@ -150,6 +168,16 @@ export class UploadQueue {
     await this.refreshSnapshot()
   }
 
+  private async refreshServerHealth(): Promise<void> {
+    try {
+      const health = await ApiClient.checkHealth()
+      const compatible = health.storageSchema === 2 && Boolean(health.capabilities)
+      this.updateSnapshot({ serverOnline: true, serverCompatible: compatible, serverCapabilities: health.capabilities ?? null, lastError: compatible ? '' : '服务器 API 版本过旧，请重启 8000 服务后再进行处理。' })
+    } catch (error) {
+      this.setError(error)
+    }
+  }
+
   async reconcileSession(sessionId: string): Promise<void> {
     const state = await ApiClient.getUploadState(sessionId)
     const serverChunks = new Map<string, { size: number; sha256: string }>()
@@ -157,15 +185,15 @@ export class UploadQueue {
       for (const chunk of segment.chunks) serverChunks.set(`${segment.segmentId}:${chunk.index}`, { size: chunk.size, sha256: chunk.sha256 })
     }
 
-    const localChunks = (await ChunkStore.listBySessionId(sessionId))
+    const localChunks = (await ChunkStore.listMetadataBySessionId(sessionId))
     for (const local of localChunks) {
       const server = serverChunks.get(`${local.segmentId}:${local.index}`)
       if (!server) {
-        if (local.uploadStatus === 'UPLOADED' || local.uploadStatus === 'UPLOADING') await ChunkStore.put({ ...local, uploadStatus: 'PENDING' })
+        if (local.uploadStatus === 'UPLOADED' || local.uploadStatus === 'UPLOADING') await ChunkStore.updateUploadState(local.id, { uploadStatus: 'PENDING' })
       } else if (server.sha256 === local.sha256 && server.size === local.size) {
-        if (local.uploadStatus !== 'UPLOADED') await ChunkStore.put({ ...local, uploadStatus: 'UPLOADED', uploadedAt: local.uploadedAt ?? Date.now() })
+        if (local.uploadStatus !== 'UPLOADED') await ChunkStore.updateUploadState(local.id, { uploadStatus: 'UPLOADED', uploadedAt: local.uploadedAt ?? Date.now() })
       } else {
-        await ChunkStore.put({ ...local, uploadStatus: 'FAILED', lastUploadAttemptAt: Date.now() })
+        await ChunkStore.updateUploadState(local.id, { uploadStatus: 'FAILED', lastUploadAttemptAt: Date.now() })
         this.updateSnapshot({ lastError: `服务器 Chunk 校验不一致：${local.segmentId} #${local.index}` })
       }
     }
@@ -175,7 +203,7 @@ export class UploadQueue {
   async completeSegment(sessionId: string, segmentId: string): Promise<void> {
     try {
       await this.flush()
-      const chunks = await ChunkStore.listBySegmentId(segmentId)
+      const chunks = await ChunkStore.listMetadataBySegmentId(segmentId)
       if (chunks.some((chunk) => chunk.uploadStatus !== 'UPLOADED')) throw new Error(`Segment 仍有未上传 Chunk：${segmentId}`)
       await ApiClient.completeSegment(sessionId, segmentId, chunks.length)
       this.updateSnapshot({ serverOnline: true, lastError: '' })
@@ -187,7 +215,7 @@ export class UploadQueue {
   async completeSession(sessionId: string): Promise<void> {
     try {
       await this.flush()
-      const chunks = await ChunkStore.listBySessionId(sessionId)
+      const chunks = await ChunkStore.listMetadataBySessionId(sessionId)
       if (chunks.some((chunk) => chunk.uploadStatus !== 'UPLOADED')) throw new Error(`Session 仍有未上传 Chunk：${sessionId}`)
       await ApiClient.completeSession(sessionId, chunks.length)
       this.updateSnapshot({ serverOnline: true, lastError: '' })
@@ -197,23 +225,35 @@ export class UploadQueue {
   }
 
   async refreshSnapshot(): Promise<void> {
-    const chunks = await ChunkStore.listAll()
+    const [total, uploaded, pending, uploading, failed] = await Promise.all([
+      ChunkStore.countAll(),
+      ChunkStore.countByUploadStatus('UPLOADED'),
+      ChunkStore.countByUploadStatus('PENDING'),
+      ChunkStore.countByUploadStatus('UPLOADING'),
+      ChunkStore.countByUploadStatus('FAILED'),
+    ])
     this.updateSnapshot({
-      total: chunks.length,
-      uploaded: chunks.filter((chunk) => chunk.uploadStatus === 'UPLOADED').length,
-      pending: chunks.filter((chunk) => chunk.uploadStatus === 'PENDING' || chunk.uploadStatus === 'UPLOADING').length,
-      failed: chunks.filter((chunk) => chunk.uploadStatus === 'FAILED').length,
+      total,
+      uploaded,
+      pending: pending + uploading,
+      failed,
       isUploading: this.running,
     })
   }
 
   async snapshotForSession(sessionId: string): Promise<Pick<UploadQueueSnapshot, 'total' | 'uploaded' | 'pending' | 'failed'>> {
-    const chunks = await ChunkStore.listBySessionId(sessionId)
+    const [total, uploaded, pending, uploading, failed] = await Promise.all([
+      ChunkStore.countBySessionId(sessionId),
+      ChunkStore.countBySessionAndUploadStatus(sessionId, 'UPLOADED'),
+      ChunkStore.countBySessionAndUploadStatus(sessionId, 'PENDING'),
+      ChunkStore.countBySessionAndUploadStatus(sessionId, 'UPLOADING'),
+      ChunkStore.countBySessionAndUploadStatus(sessionId, 'FAILED'),
+    ])
     return {
-      total: chunks.length,
-      uploaded: chunks.filter((chunk) => chunk.uploadStatus === 'UPLOADED').length,
-      pending: chunks.filter((chunk) => chunk.uploadStatus === 'PENDING' || chunk.uploadStatus === 'UPLOADING').length,
-      failed: chunks.filter((chunk) => chunk.uploadStatus === 'FAILED').length,
+      total,
+      uploaded,
+      pending: pending + uploading,
+      failed,
     }
   }
 
@@ -278,7 +318,7 @@ export class UploadQueue {
   }
 
   private readonly handleOffline = (): void => {
-    this.updateSnapshot({ serverOnline: false, lastError: '网络已断开，上传暂停；录音继续本地保存。' })
+    this.updateSnapshot({ serverOnline: false, serverCompatible: null, serverCapabilities: null, lastError: '网络已断开，上传暂停；录音继续本地保存。' })
   }
 
   private async finalizeCompletedSessions(): Promise<void> {
@@ -287,7 +327,7 @@ export class UploadQueue {
       try {
         const [segments, chunks] = await Promise.all([
           SegmentStore.listBySessionId(session.id),
-          ChunkStore.listBySessionId(session.id),
+          ChunkStore.listMetadataBySessionId(session.id),
         ])
         if (chunks.some((chunk) => chunk.uploadStatus !== 'UPLOADED')) continue
 
@@ -314,9 +354,18 @@ export class UploadQueue {
   }
 
   private setError(error: unknown): void {
+    // Receiving an HTTP response proves that the API is reachable. Only a
+    // network/timeout error should flip the server to offline; 4xx responses
+    // are application errors (for example an incomplete upload) and should
+    // not block the next queue retry or mislead the user about connectivity.
+    const isReachableApiError = error instanceof ApiRequestError
+    const isNetworkError = !isReachableApiError && (!navigator.onLine || isTransientNetworkError(error))
     this.updateSnapshot({
-      serverOnline: false,
-      lastError: !navigator.onLine ? '网络已断开，上传暂停；录音继续本地保存。' : error instanceof Error ? error.message : '上传失败。',
+      serverOnline: isNetworkError ? false : true,
+      ...(isNetworkError ? { serverCompatible: null, serverCapabilities: null } : {}),
+      lastError: !navigator.onLine
+        ? '网络已断开，上传暂停；录音继续本地保存。'
+        : error instanceof Error ? error.message : '上传失败。',
     })
   }
 

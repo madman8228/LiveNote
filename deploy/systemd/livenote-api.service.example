@@ -1,0 +1,20 @@
+[Unit]
+Description=LiveNote API
+After=network.target
+
+[Service]
+Type=simple
+User=livenote
+Group=livenote
+WorkingDirectory=/opt/livenote/app
+Environment=PORT=8000
+Environment=LIVENOTE_ENV=production
+EnvironmentFile=-/etc/livenote/livenote.env
+ExecStart=/opt/livenote/venv/bin/uvicorn main:app --app-dir /opt/livenote/app/server --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

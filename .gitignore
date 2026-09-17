@@ -1,7 +1,15 @@
 node_modules/
 dist/
+.build-verification/
 .playwright-cli/
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
 server/livenote.sqlite3
-server/__pycache__/
+__pycache__/
+*.pyc
 server/data/*
 !server/data/.gitkeep

@@ -27,6 +27,8 @@ export interface RecorderStartOptions {
   timesliceMs?: number
   sessionElapsedBaseMs?: number
   onChunk?: (chunk: RecorderChunk) => Promise<void> | void
+  onChunkError?: (error: Error) => void
+  onRecorderError?: (error: Error) => void
 }
 
 export interface RecorderEngine {

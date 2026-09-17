@@ -1,4 +1,4 @@
-import { getAllRecords, getRecord, putRecord, STORE_NAMES } from './db'
+import { deleteRecord, getAllRecords, getRecord, putRecord, STORE_NAMES } from './db'
 import type { SessionRecord, SessionStatus } from './types'
 
 export const SessionStore = {
@@ -13,12 +13,15 @@ export const SessionStore = {
   listOpen() {
     return getAllRecords<SessionRecord>(STORE_NAMES.sessions).then((sessions) => (
       sessions
-        .filter((session) => session.status === 'RECORDING' || session.status === 'PAUSED' || session.status === 'FINALIZING')
+        .filter((session) => session.status === 'RECORDING' || session.status === 'PAUSED' || session.status === 'FINALIZING' || session.status === 'INTERRUPTED')
         .sort((a, b) => b.updatedAt - a.updatedAt)
     ))
   },
   put(session: SessionRecord) {
     return putRecord(STORE_NAMES.sessions, session)
+  },
+  delete(id: string) {
+    return deleteRecord(STORE_NAMES.sessions, id)
   },
   async updateStatus(id: string, status: SessionStatus, endedAt: number | null = null): Promise<SessionRecord> {
     const session = await getRecord<SessionRecord>(STORE_NAMES.sessions, id)

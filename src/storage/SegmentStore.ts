@@ -1,4 +1,4 @@
-import { getAllByIndex, getRecord, putRecord, STORE_NAMES } from './db'
+import { deleteRecord, getAllByIndex, getRecord, putRecord, STORE_NAMES } from './db'
 import type { SegmentRecord } from './types'
 
 export const SegmentStore = {
@@ -12,6 +12,9 @@ export const SegmentStore = {
   },
   put(segment: SegmentRecord) {
     return putRecord(STORE_NAMES.segments, segment)
+  },
+  delete(id: string) {
+    return deleteRecord(STORE_NAMES.segments, id)
   },
   async nextIndex(sessionId: string): Promise<number> {
     const segments = await this.listBySessionId(sessionId)

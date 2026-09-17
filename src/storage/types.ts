@@ -18,6 +18,7 @@ export interface SegmentRecord {
   sessionId: string
   index: number
   startedAt: number
+  startElapsedMs: number
   endedAt: number | null
   mimeType: string
   mediaSettings: Record<string, unknown>
@@ -42,6 +43,8 @@ export interface ChunkRecord {
   lastUploadAttemptAt: number | null
   uploadedAt: number | null
 }
+
+export type ChunkMetadata = Omit<ChunkRecord, 'blob'>
 
 export type MarkerType = 'KEY_POINT' | 'QUESTION' | 'IDEA' | 'TODO'
 

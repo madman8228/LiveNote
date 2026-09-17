@@ -1,5 +1,5 @@
 const DB_NAME = 'livenote-db'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 export const STORE_NAMES = {
   sessions: 'sessions',
@@ -40,6 +40,12 @@ export function openDatabase(): Promise<IDBDatabase> {
         store.createIndex('segmentId', 'segmentId', { unique: false })
         store.createIndex('segmentIndex', ['segmentId', 'index'], { unique: false })
         store.createIndex('uploadStatus', 'uploadStatus', { unique: false })
+        store.createIndex('sessionUploadStatus', ['sessionId', 'uploadStatus'], { unique: false })
+      } else {
+        const store = request.transaction?.objectStore(STORE_NAMES.chunks)
+        if (store && !store.indexNames.contains('sessionUploadStatus')) {
+          store.createIndex('sessionUploadStatus', ['sessionId', 'uploadStatus'], { unique: false })
+        }
       }
 
       if (!database.objectStoreNames.contains(STORE_NAMES.markers)) {
@@ -75,11 +81,20 @@ export function openDatabase(): Promise<IDBDatabase> {
 
     request.onsuccess = () => {
       const database = request.result
-      database.onversionchange = () => database.close()
+      database.onversionchange = () => {
+        database.close()
+        databasePromise = null
+      }
       resolve(database)
     }
-    request.onerror = () => reject(request.error ?? new Error('无法打开 IndexedDB。'))
-    request.onblocked = () => reject(new Error('IndexedDB 正在被其他页面占用。'))
+    request.onerror = () => {
+      databasePromise = null
+      reject(request.error ?? new Error('无法打开 IndexedDB。'))
+    }
+    request.onblocked = () => {
+      databasePromise = null
+      reject(new Error('IndexedDB 正在被其他页面占用。'))
+    }
   })
 
   return databasePromise
@@ -135,6 +150,49 @@ export async function getAllByIndex<T>(storeName: string, indexName: string, que
   const result = await requestResult(transaction.objectStore(storeName).index(indexName).getAll(query))
   await done
   return result as T[]
+}
+
+export async function getAllByIndexCursor<T, R>(
+  storeName: string,
+  indexName: string,
+  query: IDBKeyRange | IDBValidKey,
+  map: (value: T) => R,
+): Promise<R[]> {
+  const database = await openDatabase()
+  const transaction = database.transaction(storeName, 'readonly')
+  const result: R[] = []
+  await new Promise<void>((resolve, reject) => {
+    const request = transaction.objectStore(storeName).index(indexName).openCursor(query)
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      result.push(map(cursor.value as T))
+      cursor.continue()
+    }
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB 游标读取失败。'))
+    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB 游标事务失败。'))
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB 游标事务被中止。'))
+    transaction.oncomplete = () => resolve()
+  })
+  return result
+}
+
+export async function countRecords(storeName: string): Promise<number> {
+  const database = await openDatabase()
+  const transaction = database.transaction(storeName, 'readonly')
+  const done = transactionDone(transaction)
+  const result = await requestResult(transaction.objectStore(storeName).count())
+  await done
+  return result
+}
+
+export async function countByIndex(storeName: string, indexName: string, query: IDBKeyRange | IDBValidKey): Promise<number> {
+  const database = await openDatabase()
+  const transaction = database.transaction(storeName, 'readonly')
+  const done = transactionDone(transaction)
+  const result = await requestResult(transaction.objectStore(storeName).index(indexName).count(query))
+  await done
+  return result
 }
 
 export async function deleteRecord(storeName: string, id: string): Promise<void> {
