@@ -1103,7 +1103,7 @@ function summaryKeyPoints(report: ReportResponse | undefined): string[] {
 }
 
 function summaryKnowledgeStructure(report: ReportResponse | undefined): Array<{ title: string; points: string[] }> {
-  return report?.summary?.knowledgeStructure ?? []
+  return report?.summary?.knowledgeStructure ?? report?.localDraft?.knowledgeStructure ?? []
 }
 
 function summaryActionItems(report: ReportResponse | undefined): string[] {

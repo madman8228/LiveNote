@@ -4,7 +4,7 @@
 
 LiveNote 是面向 Android Chrome 的直播录音 PWA 原型。本阶段已完成 M0～M3，并实现 M4～M9：连续 MediaRecorder 录音、IndexedDB 本地持久化、Wake Lock、页面生命周期风险记录、SHA256 校验、异步上传队列、FastAPI + SQLite + 本地文件存储，以及本地 FFmpeg/Whisper/结构化报告的后台处理任务。
 
-当前已加入本地 FFmpeg 音频重建接口、本地 Whisper ASR 接口、可选 OpenAI-compatible LLM 语义总结和结构化报告接口，但仍不包含说话人识别、实时字幕、用户账号、云对象存储和复杂 PWA 逻辑。录音、IndexedDB 和上传队列彼此独立：服务器或网络失败不会停止录音，也不会删除本地 Blob。
+当前已加入本地 FFmpeg 音频重建接口、本地 Whisper ASR 接口、无 LLM 时的抽取式草稿、可选 OpenAI-compatible LLM 语义总结和结构化报告接口，但仍不包含说话人识别、实时字幕、用户账号、云对象存储和复杂 PWA 逻辑。录音、IndexedDB 和上传队列彼此独立：服务器或网络失败不会停止录音，也不会删除本地 Blob。
 
 ## 当前完成度与未完成事项
 
@@ -14,7 +14,7 @@ LiveNote 是面向 Android Chrome 的直播录音 PWA 原型。本阶段已完�
 
 - 真实 Android Chrome 的 60 分钟以上长录音、刷新恢复、断网恢复和锁屏风险，需要手机端实测；电脑端回归测试不能替代它。
 - 当前 8000 端口如果还是旧 API 进程，必须重启后才能使用最新的完整上传收尾和 ASR 处理接口；设置页会显示“API 需重启”。
-- 语义总结需要配置 OpenAI-compatible LLM 或本地 Ollama。未配置时返回的是 ASR 加用户标记的本地草稿，不是语义模型总结。
+- 语义总结需要配置 OpenAI-compatible LLM 或本地 Ollama。未配置时返回的是 ASR、用户标记和抽取式本地草稿，不是语义模型总结。
 - Speech 与 Raw-ish 的最终选择仍应以相同音源的人工听感和 ASR 结果共同决定；当前默认使用 Speech。
 - 说话人识别、用户账号、云对象存储、生产级任务队列、备份恢复和正式域名 HTTPS 尚未实现。
 

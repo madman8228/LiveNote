@@ -79,7 +79,7 @@ export interface ReportResponse {
   session?: { id?: string; title?: string; durationMs?: number }
   summaryError?: string | null
   summary?: ContentSummary | null
-  localDraft?: { overviewPreview: string; keyPoints: ReportMarker[]; questions: ReportMarker[]; ideas: ReportMarker[]; todos: ReportMarker[] }
+  localDraft?: { overviewPreview: string; keyPoints: ReportMarker[]; questions: ReportMarker[]; ideas: ReportMarker[]; todos: ReportMarker[]; source?: string; knowledgeStructure?: Array<{ title: string; points: string[] }> }
   analysisProvider?: string
   transcript: TranscriptResponse
   counts: Record<string, number>

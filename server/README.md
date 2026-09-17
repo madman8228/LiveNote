@@ -101,7 +101,7 @@ GET  /api/v1/sessions/{sessionId}/report
 server/data/processed/sessions/{sessionId}/report.json
 ```
 
-未配置 LLM 时，`summaryStatus` 为 `NOT_CONFIGURED`，表示报告只包含本地逐字稿和用户标记草稿；配置后才会生成语义总结。
+未配置 LLM 时，`summaryStatus` 为 `NOT_CONFIGURED`，报告会包含本地逐字稿、用户标记和基于 ASR 时间片的“本地抽取式草稿”。抽取式草稿只重排原文，不补写事实，也不等同于语义总结；配置 LLM 后才会生成真正的主题、知识点、知识结构和问答总结。
 
 如果配置 `LIVENOTE_LLM_BASE_URL` 和 `LIVENOTE_LLM_MODEL`，报告生成时会调用 OpenAI 兼容的 `/chat/completions` 接口，输出主题、概览、关键知识点、问答、待办事项和实体列表。`LIVENOTE_LLM_API_KEY` 对本地 Ollama 等服务可省略，远程服务通常需要填写。未配置地址或模型时仍保存本地标记/逐字稿草稿，并将 `summaryStatus` 标记为 `NOT_CONFIGURED`；模型调用失败不会丢失 ASR 和本地草稿。
 

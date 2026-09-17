@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,63 @@ except ImportError:
 
 class ContentError(RuntimeError):
     pass
+
+
+def _extractive_draft(segments: list[Any], transcript_text: str, generated_at: int) -> dict[str, Any]:
+    """Build an honest, deterministic fallback when no LLM is configured.
+
+    This is intentionally extractive: it only reuses ASR text and never
+    invents a conclusion. The report keeps summaryStatus=NOT_CONFIGURED so
+    callers can distinguish it from semantic model output.
+    """
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    source_segments = segments if segments else [{'text': part} for part in re.split(r'(?<=[。！？!?；;])\s*|[\r\n]+', transcript_text)]
+    keywords = ('重点', '核心', '结论', '原因', '方法', '步骤', '因为', '所以', '需要', '可以', '注意', '问题', '解决', '首先', '其次', '总结')
+
+    for source in source_segments:
+        if not isinstance(source, dict):
+            continue
+        text = re.sub(r'\s+', ' ', str(source.get('text', '')).strip())
+        compact = re.sub(r'\s+', '', text)
+        if len(compact) < 6 or compact in seen:
+            continue
+        seen.add(compact)
+        score = min(len(compact), 80) + sum(12 for keyword in keywords if keyword in compact)
+        candidates.append({
+            'text': text,
+            'score': score,
+            'order': len(candidates),
+            'elapsedMs': source.get('startMs') if isinstance(source.get('startMs'), int) else 0,
+        })
+
+    candidates.sort(key=lambda item: (-item['score'], item['order']))
+    selected = sorted(candidates[:8], key=lambda item: item['order'])
+    key_points = [
+        {
+            'id': f'local-key-point-{index}',
+            'elapsedMs': item['elapsedMs'],
+            'wallClockMs': 0,
+            'note': item['text'],
+            'createdAt': generated_at,
+        }
+        for index, item in enumerate(selected)
+    ]
+    overview_parts = []
+    for item in sorted(candidates, key=lambda item: item['order']):
+        if item['text'] not in overview_parts:
+            overview_parts.append(item['text'])
+        if len(' '.join(overview_parts)) >= 300:
+            break
+    overview = ' '.join(overview_parts)[:300] or transcript_text.strip()[:300]
+    return {
+        'overviewPreview': overview,
+        'keyPoints': key_points,
+        'knowledgeStructure': [{
+            'title': '本地抽取式要点',
+            'points': [item['note'] for item in key_points],
+        }] if key_points else [],
+    }
 
 
 def load_transcript(data_dir: Path, session_id: str) -> dict[str, Any]:
@@ -47,9 +105,11 @@ def build_structured_report(session: dict[str, Any], markers: list[dict[str, Any
             })
 
     segments = transcript.get('segments', [])
+    extractive_draft = _extractive_draft(segments if isinstance(segments, list) else [], str(transcript.get('text', '')), generated_at)
     local_draft = {
-        'overviewPreview': str(transcript.get('text', '')).strip()[:300],
-        'keyPoints': marker_sections['keyPoints'],
+        **extractive_draft,
+        'source': 'extractive',
+        'keyPoints': marker_sections['keyPoints'] + extractive_draft['keyPoints'],
         'questions': marker_sections['questions'],
         'ideas': marker_sections['ideas'],
         'todos': marker_sections['todos'],
@@ -71,7 +131,7 @@ def build_structured_report(session: dict[str, Any], markers: list[dict[str, Any
         'summaryError': summary_error,
         'summary': summary,
         'localDraft': local_draft,
-        'analysisProvider': 'llm' if summary else 'local-marker-draft',
+        'analysisProvider': 'llm' if summary else 'local-extractive-draft',
         'generatedAt': generated_at,
         'session': {
             'id': session['id'],
