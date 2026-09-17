@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -41,10 +41,6 @@ try:
     from retention import RetentionError, delete_session_data
 except ImportError:
     from .retention import RetentionError, delete_session_data
-try:
-    from image_renderer import render_summary_svg
-except ImportError:
-    from .image_renderer import render_summary_svg
 
 SERVER_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get('LIVENOTE_DATA_DIR', SERVER_DIR / 'data'))
@@ -678,20 +674,6 @@ def get_report(session_id: str) -> dict:
         return json.loads(path.read_text(encoding='utf-8'))
     except Exception as error:
         raise HTTPException(status_code=500, detail=f'报告草稿读取失败：{error}') from error
-
-
-@app.get('/api/v1/sessions/{session_id}/summary.svg')
-def get_summary_image(session_id: str) -> Response:
-    validate_identifier(session_id, 'Session ID')
-    path = DATA_DIR / 'processed' / 'sessions' / session_id / 'report.json'
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail='该 Session 尚未生成报告草稿')
-    try:
-        report = json.loads(path.read_text(encoding='utf-8'))
-        svg = render_summary_svg(report)
-    except (OSError, json.JSONDecodeError) as error:
-        raise HTTPException(status_code=500, detail=f'总结图片生成失败：{error}') from error
-    return Response(content=svg, media_type='image/svg+xml', headers={'Content-Disposition': f'inline; filename="{session_id}-summary.svg"'})
 
 
 @app.post('/api/v1/sessions/{session_id}/process', status_code=202, response_model=ProcessingJobResponse)

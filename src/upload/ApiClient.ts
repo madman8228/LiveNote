@@ -214,16 +214,6 @@ export const ApiClient = {
   getReport(sessionId: string) {
     return requestJson<ReportResponse>(`/sessions/${encodeURIComponent(sessionId)}/report`)
   },
-  async downloadSummaryImage(sessionId: string): Promise<Blob> {
-    const response = await fetchWithTimeout(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/summary.svg`, {
-      headers: { Accept: 'image/svg+xml', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
-    })
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      throw new Error(`总结图片生成失败 (${response.status})${detail ? `：${detail}` : ''}`)
-    }
-    return response.blob()
-  },
   async downloadSessionAudio(sessionId: string): Promise<Blob> {
     const response = await fetchWithTimeout(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/audio`, {
       headers: { Accept: 'audio/webm', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
