@@ -66,6 +66,8 @@ FastAPI 默认监听 `http://0.0.0.0:8000`。Vite 开发服务器会把前端 `/
 
 “Session → Segment → Chunk”调试区域可以查看层级和每个 Chunk 的 index、大小、相对时间、创建时间、上传状态。单 Segment 点击“按序重组并验证”会从 IndexedDB 读取 Chunk 并通过 MediaSource 顺序追加；多 Segment 的整场播放会优先请求服务器 FFmpeg 重建文件，避免把多个独立 WebM 初始化头直接追加后只播放第一个 Segment。Chunk 不被当成独立音频文件播放。
 
+重组结果提供“下载 Segment”和“下载整场”。服务器已确认收到全部 Chunk 时下载 FFmpeg 重建文件；仅有本地 MediaSource 顺序追加播放器时只能播放验证，页面会提示先完成上传，避免下载出不可用的伪音频文件。
+
 每个 Segment 还保存 `startElapsedMs`，表示它在整场 Session 单调录音时间轴中的起点。这样刷新、断开后续录时，旧 Segment 的时长不会重新从零估算；旧版本没有该字段的数据会按 0 兼容读取。
 
 录音引擎通过 `RecorderEngine` 接口与 `MediaRecorderEngine` 分离；IndexedDB 通过 `SessionStore`、`SegmentStore`、`ChunkStore`、`MarkerStore` 和 `LifecycleStore` 独立管理。Chunk 写入后计算 SHA256，再由 UploadQueue 异步上传。

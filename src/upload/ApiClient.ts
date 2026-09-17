@@ -234,6 +234,16 @@ export const ApiClient = {
     }
     return response.blob()
   },
+  async downloadSegmentAudio(sessionId: string, segmentId: string): Promise<Blob> {
+    const response = await fetchWithTimeout(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/segments/${encodeURIComponent(segmentId)}/audio`, {
+      headers: { Accept: 'audio/webm', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
+    })
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`服务器 Segment 音频重建失败 (${response.status})${detail ? `：${detail}` : ''}`)
+    }
+    return response.blob()
+  },
   uploadDiagnostic(formData: FormData) {
     return requestJson<DiagnosticUploadResponse>('/diagnostics', {
       method: 'POST',
