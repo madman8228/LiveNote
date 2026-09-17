@@ -8,6 +8,18 @@
 .\deploy\windows\Check-LiveNoteApi.ps1
 ```
 
+如果要在发布前同时确认音频重建和 ASR 已就绪：
+
+```powershell
+.\deploy\windows\Check-LiveNoteApi.ps1 -RequireProcessing
+```
+
+如果还要求必须能生成语义总结：
+
+```powershell
+.\deploy\windows\Check-LiveNoteApi.ps1 -RequireProcessing -RequireLlm -ApiKey $env:LIVENOTE_API_KEY
+```
+
 生产环境启用了 API Key 时，把 Key 只通过参数临时传入，不要写入仓库：
 
 ```powershell
