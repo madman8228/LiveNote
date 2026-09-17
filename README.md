@@ -2,6 +2,8 @@
 
 当前版本新增：多 Segment 服务器重建使用连续 Opus 重编码；长文本总结采用分段总结后合并；服务器端回归测试位于 `server/tests/`。
 
+发布前请按 [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) 区分电脑端已验证项目与必须在 Android Chrome/正式服务器上完成的验收项目。
+
 LiveNote 是面向 Android Chrome 的直播录音 PWA 原型。本阶段已完成 M0～M3，并实现 M4～M9：连续 MediaRecorder 录音、IndexedDB 本地持久化、Wake Lock、页面生命周期风险记录、SHA256 校验、异步上传队列、FastAPI + SQLite + 本地文件存储，以及本地 FFmpeg/Whisper/结构化报告的后台处理任务。
 
 当前已加入本地 FFmpeg 音频重建接口、本地 Whisper ASR 接口、无 LLM 时的抽取式草稿、可选 OpenAI-compatible LLM 语义总结和结构化报告接口，但仍不包含说话人识别、实时字幕、用户账号、云对象存储和复杂 PWA 逻辑。录音、IndexedDB 和上传队列彼此独立：服务器或网络失败不会停止录音，也不会删除本地 Blob。
