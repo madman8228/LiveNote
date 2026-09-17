@@ -61,6 +61,9 @@ class ContentTests(unittest.TestCase):
         self.assertEqual(report['analysisProvider'], 'local-extractive-draft')
         self.assertGreaterEqual(len(report['localDraft']['keyPoints']), 1)
         self.assertTrue(report['localDraft']['knowledgeStructure'])
+        structure_titles = {section['title'] for section in report['localDraft']['knowledgeStructure']}
+        self.assertIn('方法与步骤', structure_titles)
+        self.assertIn('问题与原因', structure_titles)
 
 
 if __name__ == '__main__':

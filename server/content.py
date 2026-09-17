@@ -15,6 +15,20 @@ class ContentError(RuntimeError):
     pass
 
 
+_LOCAL_STRUCTURE_RULES = (
+    ('概念与定义', ('是指', '指的是', '概念', '定义', '本质')),
+    ('方法与步骤', ('首先', '其次', '然后', '步骤', '方法', '可以', '需要', '建议')),
+    ('问题与原因', ('问题', '原因', '因为', '导致', '风险', '错误', '注意')),
+    ('核心结论', ('核心', '结论', '总结', '重点', '关键', '所以', '因此')),
+)
+
+
+def _local_structure_title(text: str) -> str:
+    scores = [(sum(1 for keyword in keywords if keyword in text), title) for title, keywords in _LOCAL_STRUCTURE_RULES]
+    score, title = max(scores, key=lambda item: item[0])
+    return title if score else '其他要点'
+
+
 def _extractive_draft(segments: list[Any], transcript_text: str, generated_at: int) -> dict[str, Any]:
     """Build an honest, deterministic fallback when no LLM is configured.
 
@@ -41,6 +55,7 @@ def _extractive_draft(segments: list[Any], transcript_text: str, generated_at: i
             'score': score,
             'order': len(candidates),
             'elapsedMs': source.get('startMs') if isinstance(source.get('startMs'), int) else 0,
+            'structureTitle': _local_structure_title(compact),
         })
 
     candidates.sort(key=lambda item: (-item['score'], item['order']))
@@ -62,13 +77,17 @@ def _extractive_draft(segments: list[Any], transcript_text: str, generated_at: i
         if len(' '.join(overview_parts)) >= 300:
             break
     overview = ' '.join(overview_parts)[:300] or transcript_text.strip()[:300]
+    structure_groups: dict[str, list[str]] = {}
+    for item in selected:
+        structure_groups.setdefault(str(item['structureTitle']), []).append(item['text'])
+    knowledge_structure = [
+        {'title': title, 'points': points}
+        for title, points in structure_groups.items()
+    ]
     return {
         'overviewPreview': overview,
         'keyPoints': key_points,
-        'knowledgeStructure': [{
-            'title': '本地抽取式要点',
-            'points': [item['note'] for item in key_points],
-        }] if key_points else [],
+        'knowledgeStructure': knowledge_structure,
     }
 
 
