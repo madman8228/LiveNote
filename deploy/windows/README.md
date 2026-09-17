@@ -1,0 +1,23 @@
+# Windows 本机 API 操作
+
+这些脚本只管理当前项目启动的 API，不会自动终止已经占用 8000 端口的进程。
+
+## 检查当前 API
+
+```powershell
+.\deploy\windows\Check-LiveNoteApi.ps1
+```
+
+如果返回的 JSON 没有 `storageSchema: 2` 和 `capabilities`，说明 8000 仍运行旧服务。
+
+## 启动当前代码
+
+确认 8000 没有被占用后：
+
+```powershell
+.\deploy\windows\Start-LiveNoteApi.ps1
+```
+
+脚本会在项目目录下创建 `.runtime-logs`，并把输出写入 `api.stdout.log` 和 `api.stderr.log`。
+
+如果 8000 已被占用，脚本只显示 PID 并退出。确认确实是旧 LiveNote API 后，再由操作者手动停止该 PID，然后重新执行启动脚本。
