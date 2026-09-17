@@ -27,3 +27,13 @@
 脚本会在项目目录下创建 `.runtime-logs`，并把输出写入 `api.stdout.log` 和 `api.stderr.log`。
 
 如果 8000 已被占用，脚本只显示 PID 并退出。确认确实是旧 LiveNote API 后，再由操作者手动停止该 PID，然后重新执行启动脚本。
+
+## Windows 备份
+
+暂停录音上传后，可把数据库、音频和处理结果备份到独立目录：
+
+```powershell
+.\deploy\windows\Backup-LiveNoteData.ps1 -Destination D:\LiveNoteBackups
+```
+
+备份目录不要放在 `server\data` 内部；脚本会拒绝这种路径。
