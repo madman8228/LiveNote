@@ -337,6 +337,34 @@ class MainStorageTests(unittest.TestCase):
             main.complete_session(session_id)
         self.assertEqual(context.exception.status_code, 409)
 
+    def test_segment_index_cannot_be_reused_with_another_segment_id(self) -> None:
+        session_id = 'duplicate-segment-index-session'
+        now = main.now_ms()
+        main.create_session(main.SessionPayload(
+            id=session_id,
+            title='duplicate segment index',
+            startedAt=now,
+            status='RECORDING',
+            createdAt=now,
+            updatedAt=now,
+        ))
+        main.create_segment(session_id, main.SegmentPayload(
+            id='duplicate-segment-one',
+            sessionId=session_id,
+            index=1,
+            startedAt=now,
+            status='RECORDING',
+        ))
+        with self.assertRaises(main.HTTPException) as context:
+            main.create_segment(session_id, main.SegmentPayload(
+                id='duplicate-segment-two',
+                sessionId=session_id,
+                index=1,
+                startedAt=now,
+                status='RECORDING',
+            ))
+        self.assertEqual(context.exception.status_code, 409)
+
     def test_real_webm_multi_segment_upload_reconstructs_full_session(self) -> None:
         from fastapi.testclient import TestClient
 

@@ -141,7 +141,7 @@ def init_db() -> None:
 
 class SessionPayload(BaseModel):
     id: str = Field(min_length=1, max_length=128)
-    title: str
+    title: str = Field(default='', max_length=200)
     startedAt: int
     endedAt: int | None = None
     status: str
@@ -157,19 +157,19 @@ class SegmentPayload(BaseModel):
     startedAt: int
     startElapsedMs: int = Field(default=0, ge=0)
     endedAt: int | None = None
-    mimeType: str = ''
+    mimeType: str = Field(default='', max_length=128)
     mediaSettings: dict = Field(default_factory=dict)
-    status: str
+    status: str = Field(max_length=32)
     durationMs: int = Field(default=0, ge=0)
 
 
 class MarkerPayload(BaseModel):
     id: str = Field(min_length=1, max_length=128)
     sessionId: str = Field(min_length=1, max_length=128)
-    type: str
+    type: str = Field(max_length=32)
     elapsedMs: int = Field(ge=0)
     wallClockMs: int = Field(ge=0)
-    note: str = ''
+    note: str = Field(default='', max_length=4000)
     createdAt: int
 
 
@@ -324,6 +324,12 @@ def create_segment(session_id: str, payload: SegmentPayload) -> dict:
     with connect() as connection:
         if connection.execute('SELECT 1 FROM sessions WHERE id = ?', (session_id,)).fetchone() is None:
             raise HTTPException(status_code=404, detail='Session 不存在')
+        existing_index = connection.execute(
+            'SELECT id FROM segments WHERE session_id = ? AND segment_index = ?',
+            (session_id, payload.index),
+        ).fetchone()
+        if existing_index is not None and existing_index['id'] != payload.id:
+            raise HTTPException(status_code=409, detail=f'Segment index 已存在：{payload.index}')
         connection.execute(
             '''INSERT INTO segments(id, session_id, segment_index, started_at, start_elapsed_ms, ended_at, mime_type,
                media_settings, status, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

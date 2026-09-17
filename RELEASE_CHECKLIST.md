@@ -15,7 +15,7 @@
 - [x] Session 删除、诊断资料上传、API Key 保护
 - [x] SQLite + 音频/结果目录本地备份、完整性校验和安全恢复工具
 - [x] PWA manifest、最小 Service Worker 和安装引导
-- [x] 后端回归测试：31 项全部通过
+- [x] 后端回归测试：32 项全部通过
 - [x] `python -m compileall -q server`、`python -m pip check` 通过
 - [x] npm 高危漏洞检查：0
 
