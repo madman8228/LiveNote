@@ -365,13 +365,13 @@ async def upload_chunk(
         if session is None or segment is None:
             raise HTTPException(status_code=404, detail='Session 或 Segment 不存在')
 
-        existing = connection.execute('SELECT size, sha256, local_path FROM chunks WHERE segment_id = ? AND chunk_index = ?', (segment_id, chunk_index)).fetchone()
         hasher = hashlib.sha256()
         body_size = 0
         relative_path = Path('sessions') / session_id / f"segment_{segment['segment_index']}" / 'chunks' / f'{chunk_index:06d}.bin'
         absolute_path = DATA_DIR / relative_path
         absolute_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = absolute_path.with_name(f'.{absolute_path.name}.{uuid.uuid4().hex}.tmp')
+        installed_path = False
         try:
             with temporary_path.open('wb') as output:
                 async for part in request.stream():
@@ -385,6 +385,12 @@ async def upload_chunk(
             actual_sha256 = hasher.hexdigest()
             if actual_sha256 != x_chunk_sha256:
                 raise HTTPException(status_code=400, detail='Chunk SHA256 不一致')
+
+            # Do not hold a SQLite write lock while streaming the request body.
+            # Lock only the short check/install/insert section so two retries
+            # for the same Segment/Chunk remain genuinely idempotent.
+            connection.execute('BEGIN IMMEDIATE')
+            existing = connection.execute('SELECT size, sha256 FROM chunks WHERE segment_id = ? AND chunk_index = ?', (segment_id, chunk_index)).fetchone()
             if existing is not None:
                 if existing['size'] == body_size and existing['sha256'] == actual_sha256:
                     temporary_path.unlink(missing_ok=True)
@@ -392,6 +398,7 @@ async def upload_chunk(
                 raise HTTPException(status_code=409, detail='相同 Segment/Chunk index 的 SHA256 不一致')
 
             temporary_path.replace(absolute_path)
+            installed_path = True
             received_at = now_ms()
             mime_type = request.headers.get('content-type', 'application/octet-stream')
             connection.execute(
@@ -401,6 +408,7 @@ async def upload_chunk(
             )
         except Exception:
             if temporary_path.exists(): temporary_path.unlink()
+            if installed_path: absolute_path.unlink(missing_ok=True)
             raise
     return {'ok': True, 'already_exists': False, 'verified': True}
 

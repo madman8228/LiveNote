@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -105,6 +106,56 @@ class MainStorageTests(unittest.TestCase):
         deleted = client.delete(f'/api/v1/sessions/{session_id}')
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.json()['chunks'], 1)
+
+    def test_concurrent_same_chunk_upload_is_idempotent(self) -> None:
+        from fastapi.testclient import TestClient
+
+        main.DB_PATH = _ROOT / 'livenote.sqlite3'
+        main.DATA_DIR = _ROOT / 'data'
+        main.init_db()
+        session_id = 'concurrent-upload-session'
+        segment_id = 'concurrent-upload-segment'
+        now = main.now_ms()
+        main.create_session(main.SessionPayload(
+            id=session_id,
+            title='concurrent upload',
+            startedAt=now,
+            status='RECORDING',
+            createdAt=now,
+            updatedAt=now,
+        ))
+        main.create_segment(session_id, main.SegmentPayload(
+            id=segment_id,
+            sessionId=session_id,
+            index=1,
+            startedAt=now,
+            mimeType='audio/webm',
+            status='RECORDING',
+        ))
+        body = b'concurrent-audio'
+        headers = {
+            'content-type': 'audio/webm',
+            'x-chunk-sha256': hashlib.sha256(body).hexdigest(),
+            'x-chunk-size': str(len(body)),
+            'x-chunk-elapsed-ms': '1000',
+        }
+
+        def upload():
+            with TestClient(main.app) as client:
+                return client.put(
+                    f'/api/v1/sessions/{session_id}/segments/{segment_id}/chunks/0',
+                    content=body,
+                    headers=headers,
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(lambda _index: upload(), (1, 2)))
+
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(sum(response.json()['already_exists'] for response in responses), 1)
+        with main.connect() as connection:
+            count = connection.execute('SELECT COUNT(*) FROM chunks WHERE segment_id = ?', (segment_id,)).fetchone()[0]
+        self.assertEqual(count, 1)
 
     def test_api_key_protects_api_routes_when_configured(self) -> None:
         from fastapi.testclient import TestClient
