@@ -49,6 +49,8 @@ LIVENOTE_WHISPER_CACHE=/var/lib/livenote/models
 4. 点击本地处理，确认后台任务完成并能读取报告。
 5. 再进行长时间录音。
 
+Windows 本地可先运行 `deploy\windows\Run-LiveNoteReleaseChecks.ps1`，一次完成构建、后端测试、编译、依赖和安全检查；正式发布时再附加 `-RequireProcessing -RequireLlm`。
+
 正式运行前还应设置定期备份。Windows 本机可在暂停上传后执行 `python server/backup.py --destination D:\LiveNoteBackups`；Linux 环境建议由定时任务调用同一脚本，并把备份目录放在独立磁盘或远程备份位置。
 
 备份可用 `python server/restore.py --backup <备份目录> --verify-only` 校验；恢复到新目录时指定 `--data-dir` 和 `--db-path`，替换现有数据必须显式加入 `--replace`。

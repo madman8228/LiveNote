@@ -2,6 +2,27 @@
 
 这些脚本只管理当前项目启动的 API，不会自动终止已经占用 8000 端口的进程。
 
+## 一键发布检查
+
+执行完整的电脑端回归检查：
+
+```powershell
+.\deploy\windows\Run-LiveNoteReleaseChecks.ps1
+```
+
+如果当前还没有最新 API，先跳过 API 检查；其余构建、测试和依赖检查仍会执行：
+
+```powershell
+.\deploy\windows\Run-LiveNoteReleaseChecks.ps1 -SkipApi
+```
+
+正式发布时可额外要求音频处理和语义总结能力：
+
+```powershell
+.\deploy\windows\Run-LiveNoteReleaseChecks.ps1 `
+  -RequireProcessing -RequireLlm -ApiKey $env:LIVENOTE_API_KEY
+```
+
 ## 检查当前 API
 
 ```powershell
