@@ -409,6 +409,7 @@ audio { width: 100%; height: 40px; }
 .session-detail .processing-status-line { line-height: 1.3; }
 .report-content { display: grid; gap: 8px; padding: 2px 0 6px; }
 .report-facts { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--muted); font-size: 10px; }
+.report-status-note { margin: 8px 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: rgba(196, 247, 104, .08); color: var(--muted); font-size: 11px; line-height: 1.5; }
 .session-detail .report-facts { gap: 4px 8px; line-height: 1.25; }
 .advanced-panel { padding: 0; }
 .session-detail .advanced-panel, .session-detail .report-panel { border-top: 0; border-bottom: 0; }
