@@ -106,6 +106,20 @@ class MainStorageTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.json()['chunks'], 1)
 
+    def test_api_key_protects_api_routes_when_configured(self) -> None:
+        from fastapi.testclient import TestClient
+
+        previous_key = main.API_KEY
+        main.API_KEY = 'test-api-key'
+        try:
+            client = TestClient(main.app)
+            self.assertEqual(client.get('/api/v1/health').status_code, 401)
+            authorized = client.get('/api/v1/health', headers={'X-API-Key': 'test-api-key'})
+            self.assertEqual(authorized.status_code, 200)
+            self.assertEqual(authorized.json()['storageSchema'], 2)
+        finally:
+            main.API_KEY = previous_key
+
     def test_latest_processing_job_can_be_restored_after_page_reload(self) -> None:
         main.DB_PATH = _ROOT / 'livenote.sqlite3'
         main.DATA_DIR = _ROOT / 'data'
