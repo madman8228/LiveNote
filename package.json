@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:playback": "node tools/tests/playback_runtime_test.mjs && node tools/tests/playback_availability_test.mjs && node tools/tests/playback_ui_state_test.mjs && node tools/tests/playback_progress_test.mjs && node tools/tests/build_id_config_test.mjs && node tools/tests/upload_health_compatibility_test.mjs && python -m unittest discover -s tools/tests -p test_playback_diagnostic.py"
   },
   "dependencies": {
     "vue": "^3.5.13"

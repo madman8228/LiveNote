@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 import uuid
@@ -101,7 +102,81 @@ def _segment_chunk_paths(data_dir: Path, connection: sqlite3.Connection, session
     return segment[0], [data_dir / row[1] for row in rows]
 
 
-def _run_job(data_dir: Path, db_path: Path, job_id: str, session_id: str, model: str, language: str) -> None:
+def _knowledge_result_from_report(report: dict[str, Any], session: sqlite3.Row) -> dict[str, Any]:
+    summary = report.get('summary')
+    if isinstance(summary, dict) and str(summary.get('title', '')).strip():
+        return summary
+
+    draft = report.get('localDraft') if isinstance(report.get('localDraft'), dict) else {}
+    key_points = [
+        str(item.get('note', '')).strip()
+        for item in draft.get('keyPoints', [])
+        if isinstance(item, dict) and str(item.get('note', '')).strip()
+    ]
+    action_items = [
+        str(item.get('note', '')).strip()
+        for item in draft.get('todos', [])
+        if isinstance(item, dict) and str(item.get('note', '')).strip()
+    ]
+    return {
+        'title': str(session['title'] or '未命名会话'),
+        'overview': str(draft.get('overviewPreview', '')).strip(),
+        'keyPoints': key_points,
+        'knowledgeStructure': draft.get('knowledgeStructure', []),
+        'questions': [],
+        'actionItems': action_items,
+        'confidenceNotes': ['当前使用本地自动提取草稿，发布前建议快速复核。'],
+    }
+
+
+def _store_task_report(db_path: Path, task_id: str, session_id: str, report: dict[str, Any], session: sqlite3.Row) -> None:
+    result = _knowledge_result_from_report(report, session)
+    content_json = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    content_hash = hashlib.sha256(content_json.encode('utf-8')).hexdigest()
+    updated_at = _now_ms()
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        task = connection.execute('SELECT status FROM processing_tasks WHERE id = ?', (task_id,)).fetchone()
+        if task is None:
+            raise JobError('处理任务不存在。')
+        existing = connection.execute(
+            'SELECT id, version FROM result_revisions WHERE task_id = ? AND content_hash = ?',
+            (task_id, content_hash),
+        ).fetchone()
+        if existing is None:
+            latest = connection.execute(
+                'SELECT COALESCE(MAX(version), 0) AS version FROM result_revisions WHERE task_id = ?',
+                (task_id,),
+            ).fetchone()['version']
+            revision_id = f'revision-{uuid.uuid4()}'
+            version = int(latest) + 1
+            connection.execute(
+                'INSERT INTO result_revisions(id, task_id, session_id, version, content_hash, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (revision_id, task_id, session_id, version, content_hash, content_json, updated_at),
+            )
+        else:
+            version = existing['version']
+        connection.execute(
+            '''UPDATE processing_tasks SET status = 'REVIEW', result_version = ?,
+               claimed_by = NULL, claimed_at = NULL, requested_worker_id = NULL,
+               lease_token_hash = NULL, lease_expires_at = NULL,
+               error_message = '', error_stage = '', updated_at = ? WHERE id = ?''',
+            (version, updated_at, task_id),
+        )
+
+
+def _mark_task_failed(db_path: Path, task_id: str, error: Exception) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            '''UPDATE processing_tasks SET status = 'FAILED',
+               claimed_by = NULL, claimed_at = NULL, requested_worker_id = NULL,
+               lease_token_hash = NULL, lease_expires_at = NULL,
+               error_message = ?, error_stage = 'AUTO_PROCESS', updated_at = ? WHERE id = ?''',
+            (str(error), _now_ms(), task_id),
+        )
+
+
+def _run_job(data_dir: Path, db_path: Path, job_id: str, session_id: str, model: str, language: str, task_id: str | None = None) -> None:
     try:
         _update_job(data_dir, job_id, status='RUNNING', stage='RECONSTRUCTING', message='正在重建 Session 音频。')
         connection = sqlite3.connect(db_path)
@@ -126,10 +201,16 @@ def _run_job(data_dir: Path, db_path: Path, job_id: str, session_id: str, model:
         _update_job(data_dir, job_id, stage='REPORT', message='ASR 完成，正在分析内容并生成报告。', transcriptSegments=len(transcript.get('segments', [])))
         report = build_structured_report(dict(session), [dict(row) for row in marker_rows], transcript, _now_ms())
         save_report(data_dir, session_id, report)
+        if task_id:
+            _store_task_report(db_path, task_id, session_id, report, session)
         _update_job(data_dir, job_id, status='COMPLETED', stage='DONE', message='本地 ASR、内容分析和报告已完成。', transcriptSegments=len(transcript.get('segments', [])), markerCount=len(marker_rows), reportStatus=report.get('summaryStatus'))
     except (JobError, ReconstructionError, AsrError, ContentError) as error:
+        if task_id:
+            _mark_task_failed(db_path, task_id, error)
         _update_job(data_dir, job_id, status='FAILED', stage='FAILED', message=str(error), error=str(error))
     except Exception as error:
+        if task_id:
+            _mark_task_failed(db_path, task_id, error)
         _update_job(data_dir, job_id, status='FAILED', stage='FAILED', message='本地处理发生未预期错误。', error=str(error))
 
 
@@ -138,13 +219,13 @@ def _now_ms() -> int:
     return round(time.time() * 1000)
 
 
-def create_job(data_dir: Path, db_path: Path, session_id: str, model: str, language: str) -> dict[str, Any]:
+def create_job(data_dir: Path, db_path: Path, session_id: str, model: str, language: str, task_id: str | None = None) -> dict[str, Any]:
     # The check and creation must be atomic from the app's point of view.
     # Otherwise two rapid clicks can both observe no active job and enqueue
     # duplicate reconstruction/ASR work for the same Session.
     with _lock:
         existing = find_active_job(data_dir, session_id)
-        if existing is not None:
+        if existing is not None and (task_id is None or existing.get('taskId') == task_id):
             return existing
         job_id = f'job-{uuid.uuid4()}'
         now = _now_ms()
@@ -159,8 +240,10 @@ def create_job(data_dir: Path, db_path: Path, session_id: str, model: str, langu
             'createdAt': now,
             'updatedAt': now,
         }
+        if task_id:
+            state['taskId'] = task_id
         _write_job(data_dir, state)
-        _executor.submit(_run_job, data_dir, db_path, job_id, session_id, model, language)
+        _executor.submit(_run_job, data_dir, db_path, job_id, session_id, model, language, task_id)
         return state
 
 
@@ -180,6 +263,7 @@ def recover_jobs(data_dir: Path, db_path: Path) -> int:
         session_id = state.get('sessionId')
         model = state.get('model') or 'medium'
         language = state.get('language') or 'zh'
+        task_id = state.get('taskId') if isinstance(state.get('taskId'), str) else None
         if not isinstance(job_id, str) or not isinstance(session_id, str):
             continue
         state.update({
@@ -189,6 +273,6 @@ def recover_jobs(data_dir: Path, db_path: Path) -> int:
             'updatedAt': _now_ms(),
         })
         _write_job(data_dir, state)
-        _executor.submit(_run_job, data_dir, db_path, job_id, session_id, model, language)
+        _executor.submit(_run_job, data_dir, db_path, job_id, session_id, model, language, task_id)
         recovered += 1
     return recovered

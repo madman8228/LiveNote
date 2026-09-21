@@ -5,8 +5,8 @@ python -m pip install -r server/requirements.txt
 python server/main.py
 ```
 
-依赖中包含 `openai-whisper` 和 `torch`。Whisper 模型文件仍需单独准备到
-`LIVENOTE_WHISPER_CACHE`，不会在录音过程中临时下载；生产部署前应先用短音频验证模型可加载。
+本机正式流程由独立的 `tools/livenote_transcriber.py` 使用缓存的 Whisper 自动转写，服务器只保存检查点、逐字稿和任务状态；总结由当前 Codex 聊天读取 `/summary-input` 后生成并回传。不会调用 OpenAI API。
+`server/requirements.txt` 包含 Whisper/PyTorch；模型文件需要由部署提前准备，服务不会静默下载大型模型。
 
 默认监听 `0.0.0.0:8000`，SQLite 在 `server/livenote.sqlite3`，音频二进制文件在 `server/data/`。
 
@@ -17,10 +17,12 @@ python server/main.py
 - `LIVENOTE_CORS_ORIGINS`：逗号分隔的允许来源；默认允许本机 Vite HTTPS 地址。
 - `LIVENOTE_API_KEY`：设置后，`/api/v1/*` 请求必须携带 `X-API-Key`；不设置时保持本地开发兼容。
 - `LIVENOTE_ENV`：设置为 `production` 后，缺少 API Key 或 CORS 白名单会阻止服务启动。
+- `LIVENOTE_ADMIN_USERNAME` / `LIVENOTE_ADMIN_PASSWORD`：生产环境预先初始化 PC 管理控制台账号和密码；本地开发首次打开管理页时也可以直接完成初始化，账号哈希保存在 SQLite；旧版 `LIVENOTE_ADMIN_TOKEN` 可在迁移期间保留。
 
 生产部署不要依赖空 API Key 或默认 CORS。请复制项目根目录的 `.env.example` 和本目录的 `.env.example`，在服务管理器中设置真实的 `LIVENOTE_API_KEY`、前端 HTTPS 来源白名单，以及独立可备份的 `LIVENOTE_DATA_DIR`、`LIVENOTE_DB_PATH`。当前后台任务队列是单进程实现，API 必须使用 `--workers 1`。
 
-访问 `/api/v1/health` 会返回 `storageSchema` 和处理能力状态，可确认 FFmpeg、默认 Whisper 模型缓存和 LLM 是否已准备好；手机设置页也会显示这些状态。
+访问 `/api/v1/health` 会返回 `storageSchema` 和服务器能力状态，可确认 FFmpeg、FFprobe
+和人工处理模式是否可用；手机设置页也会显示这些状态。
 
 ## 诊断资料
 
@@ -51,67 +53,76 @@ POST /api/v1/sessions/{sessionId}/reconstruct
 GET  /api/v1/sessions/{sessionId}/audio
 ```
 
-原始 Chunk 保留在 `server/data/sessions/`，重建后的 WebM 文件写入 `server/data/reconstructed/`。音频重建结果会继续交给后台 ASR 和报告处理任务。
+原始 Chunk 保留在 `server/data/sessions/`，重建后的 WebM 文件写入 `server/data/reconstructed/`。
+音频重建结果会作为本机自动转写器的输入。
 
-整场播放、ASR 和后台处理只接受已经通过 Segment/Session 收尾校验的完整上传；如果仍有 Pending Chunk，接口会返回 `409`，避免把服务器上的半截音频误当成整场录音。
+整场播放和任务处理只接受已经通过 Segment/Session 收尾校验的完整上传；如果仍有 Pending
+Chunk，接口会返回 `409`，避免把服务器上的半截音频误当成整场录音。
 
-## M7 本地 ASR
+### 上传期间增量识别
 
-超过 `LIVENOTE_ASR_CHUNK_SECONDS` 的长音频会按固定时长切分，并保留 1 秒重叠后逐段转写，再合并为统一时间轴；默认每段 300 秒、重叠 1 秒，避免把整场 1～4 小时音频一次性载入内存。
+服务器收到连续的 4 个 30 秒 Chunk 后，会在单独的持久化 Worker 中尝试建立一个增量处理窗口，
+并把已经提交的部分逐字稿保存到 `processed/sessions/<session-id>/transcript-live.json`。
+原始 MediaRecorder Chunk 不是独立媒体文件，服务不会直接识别单个 `.bin`，而是先按连续 index
+追加前缀暂存文件；缺片或增长中的 WebM 暂时无法解码时会等待并记录原因。录音结束后的完整处理
+仍以全部 Chunk 为准，增量逐字稿不能直接发布。
 
-本机如果已经准备好 `openai-whisper`、PyTorch 和模型缓存，可以调用：
+可调参数：`LIVENOTE_LIVE_PROCESSING_ENABLED`（默认开启）、`LIVENOTE_LIVE_WINDOW_CHUNKS`
+（2–4，默认 4）、`LIVENOTE_LIVE_WINDOW_OVERLAP_SECONDS`（默认 2）和
+`LIVENOTE_LIVE_POLL_SECONDS`（默认 2）。增量状态可通过设备权限访问
+`GET /api/v1/sessions/{sessionId}/live-processing`，部分文字通过
+`GET /api/v1/sessions/{sessionId}/live-transcript` 读取。
 
-```text
-POST /api/v1/sessions/{sessionId}/transcribe
-Content-Type: application/json
+## 电脑端自动处理任务
 
-{"model":"tiny","language":"zh"}
-```
-
-不传 `model` 时默认使用 `LIVENOTE_WHISPER_MODEL`，默认值为 `medium`。模型缓存目录默认是 `~/.cache/whisper`，也可以通过 `LIVENOTE_WHISPER_CACHE` 指定。接口会先重建 Session，再生成带 `startMs`、`endMs`、`text` 的逐字稿，并保存到：
-
-```text
-server/data/processed/sessions/{sessionId}/transcript.json
-```
-
-读取已生成逐字稿：
-
-```text
-GET /api/v1/sessions/{sessionId}/transcript
-```
-
-当前 ASR 使用 CPU 或本机可用的 CUDA 自动选择；还没有说话人识别和实时字幕。长音频会分段转写，避免一次性载入整场音频。
-
-ASR 开始前会用 FFmpeg 检查输入音量，并将原始 WebM 临时转换为 16kHz、单声道、PCM WAV，应用温和的语音频段滤波和响度标准化后再交给 Whisper；原始重建音频不会被覆盖。明显接近静音时任务会失败并提示重新使用 `Speech` 配置录音，避免 Whisper 对低音量噪声生成重复幻觉。转写时关闭跨片段文本上下文累积，以降低长录音中的重复扩散。
-
-## M8 结构化报告草稿
-
-配置 LLM 后，报告除了关键知识点，还会返回 `knowledgeStructure`，每个节点包含 `title` 和 `points`，手机端会在总结阅读卡中按层级展示。
-
-在已有逐字稿后，可以生成不依赖 LLM 的结构化报告草稿：
+录音上传完成后，服务器会为 Session 创建 `processing_tasks` 任务。本机启动脚本会同时启动
+API 和 `livenote_transcriber.py watch`；浏览器关闭不影响转写。管理员不需要领取文件，
+也不需要选择结果 JSON。只有当用户在当前 Codex 聊天发起“总结这条录音”时，才进入总结阶段。
 
 ```text
-POST /api/v1/sessions/{sessionId}/report
-GET  /api/v1/sessions/{sessionId}/report
+READY
+  → 本机后台自动重建并分段转写
+  → TRANSCRIBED
+  → 当前 Codex 聊天读取逐字稿并生成总结
+  → REVIEW
+  → 管理员发布
+  → COMPLETED
 ```
 
-报告会整合 Session 元数据、ASR 时间轴和本地标记，分为重点、疑问、灵感、待办等部分。输出保存到：
+控制台地址为 `http://127.0.0.1:4173/?mode=control`。本机模式直接读取服务器已保存的音频并分段落盘；
+云端 Worker 仍保留为异机兼容入口。
+云端模式下，家庭 PC 可以在控制台“设置”中填写 Worker 凭证并启动浏览器 Worker，
+选择任务目录后自动领取和保存音频，也可以继续使用命令行 Worker 做异机轮询。
+每段有独立的 source hash、模型、语言、运行代次和状态；服务重启后会复用已完成分段，不会从头重跑整场录音。
+任务卡只展示“排队中、转写中、待总结、总结中、待发布、已发布”和真正需要处理的异常。
 
-```text
-server/data/processed/sessions/{sessionId}/report.json
+如果转写进程重启或中途失败，已完成分段会保留，后台会从失败分段继续；失败会明确标记为“失败”并保留重试入口，不会无限停留在“处理中”。
+
+Codex 读取逐字稿使用：
+
+```powershell
+python tools/livenote_transcriber.py summary-prepare task-xxxx
 ```
 
-未配置 LLM 时，`summaryStatus` 为 `NOT_CONFIGURED`，报告会包含本地逐字稿、用户标记和基于 ASR 时间片的“本地抽取式草稿”。抽取式草稿只重排原文，不补写事实，也不等同于语义总结；配置 LLM 后才会生成真正的主题、知识点、知识结构和问答总结。
+提交时使用包含 `runId`、`generation`、`sourceHash` 和 `result` 的总结文件：
 
-如果配置 `LIVENOTE_LLM_BASE_URL` 和 `LIVENOTE_LLM_MODEL`，报告生成时会调用 OpenAI 兼容的 `/chat/completions` 接口，输出主题、概览、关键知识点、问答、待办事项和实体列表。`LIVENOTE_LLM_API_KEY` 对本地 Ollama 等服务可省略，远程服务通常需要填写。未配置地址或模型时仍保存本地标记/逐字稿草稿，并将 `summaryStatus` 标记为 `NOT_CONFIGURED`；模型调用失败不会丢失 ASR 和本地草稿。
+```powershell
+python tools/livenote_transcriber.py summary-submit task-xxxx summary-result.json
+```
+
+回传结果使用结构化 JSON，最小格式见项目根目录 README 的 `knowledge.json` 示例；本地旧版 `result-local` 接口仅作为兼容入口保留。
+服务器保存结果版本，管理员确认后才更新手机端可见的发布指针；手机不会看到未发布草稿。
 
 ## 总结阅读卡
 
-报告生成后，主流程由前端展示可切换背景的总结阅读卡，适合手机直接截图分享。服务器只返回结构化文字和时间轴，不生成图片；没有配置 LLM 时会明确显示为本地抽取式草稿。
+发布后，主流程由前端展示可切换背景的总结阅读卡，适合手机直接截图分享。服务器只返回结构化文字，
+不生成图片。
 
 ## 服务端 Session 清理
 
-服务端提供 `DELETE /api/v1/sessions/{sessionId}`，会删除该 Session 的数据库记录、Chunk 文件、重建音频、ASR/报告结果和处理任务状态。正在处理的 Session 会返回 `409`，避免后台任务和清理操作竞争。该接口受 API Key 保护；手机端服务器在线时，单个 Session 删除会同步清理服务器副本。
+服务端提供 `DELETE /api/v1/sessions/{sessionId}`，会删除该 Session 的数据库记录、Chunk 文件、
+重建音频、处理结果和处理任务状态。正在处理的 Session 会返回 `409`，避免任务和清理操作竞争。
+该接口受设备身份或管理员权限保护；手机端服务器在线时，单个 Session 删除会同步清理服务器副本。
 
 ## 数据备份
 
@@ -131,23 +142,5 @@ python server/restore.py --backup D:\LiveNoteBackups\livenote-... --verify-only
 
 恢复到新目录时指定 `--data-dir` 和 `--db-path`；默认不覆盖已有目标。确认替换时使用 `--replace`，旧目标会保留为 `before-restore` 副本，便于回滚。恢复前应暂停 API 和录音上传。
 
-## M9 后台处理任务
-
-长音频不建议让手机页面一直等待同步请求。现在可以创建一个本地后台处理任务：
-
-```text
-POST /api/v1/sessions/{sessionId}/process
-Content-Type: application/json
-
-{"model":"base","language":"zh"}
-```
-
-接口会立即返回任务编号，然后轮询：
-
-```text
-GET /api/v1/jobs/{jobId}
-```
-
-页面刷新后，可用 `GET /api/v1/sessions/{sessionId}/processing` 找回该 Session 最近一次处理任务；如果任务仍在排队或执行中，手机端会继续显示当前阶段。
-
-任务状态包括 `QUEUED`、`RUNNING`、`COMPLETED`、`FAILED`，阶段包括 `RECONSTRUCTING`、`ASR`、`REPORT` 和 `DONE`。任务状态文件保存在 `server/data/processed/jobs/`。当前使用单进程、单并发队列，适合本地电脑验证；服务重启后，`QUEUED` 或 `RUNNING` 任务会自动重新排队，同一 Session 的重复提交会返回原任务编号。正式部署时仍应保持单 worker，或改用外部任务队列。
+旧的 `/transcribe`、`/report`、`/process`、`/jobs` 和 `/processing` HTTP 入口已停用，
+会返回 410。它们不属于当前手机录音到知识总结的正式链路。

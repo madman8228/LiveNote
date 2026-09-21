@@ -4,7 +4,7 @@ import { SegmentStore } from '../storage/SegmentStore'
 import { SessionStore } from '../storage/SessionStore'
 import { sha256Blob } from '../storage/sha256'
 import type { ChunkRecord, MarkerRecord } from '../storage/types'
-import { ApiClient, ApiRequestError, type ServerCapabilities } from './ApiClient'
+import { ApiClient, ApiRequestError, isCompatibleServerHealth, type ServerCapabilities } from './ApiClient'
 import { canRetryNow } from './RetryPolicy'
 
 export interface UploadQueueSnapshot {
@@ -43,6 +43,9 @@ export class UploadQueue {
   private running = false
   private flushPromise: Promise<void> | null = null
   private started = false
+  private readonly pausedSessionIds = new Set<string>()
+  private readonly sessionAbortControllers = new Map<string, AbortController>()
+  private readonly activeSessionOperations = new Map<string, Promise<void>>()
   private retryTimer: number | null = null
   private healthTimer: number | null = null
   private snapshot: UploadQueueSnapshot = { ...INITIAL_SNAPSHOT }
@@ -88,6 +91,44 @@ export class UploadQueue {
     this.healthTimer = null
   }
 
+  async pauseSessionAndWait(sessionId: string): Promise<void> {
+    this.pausedSessionIds.add(sessionId)
+    this.sessionAbortControllers.get(sessionId)?.abort()
+    const activeOperation = this.activeSessionOperations.get(sessionId)
+    if (activeOperation) {
+      try {
+        await activeOperation
+      } catch {
+        // The delete flow owns cleanup; a failed queue attempt must not block it.
+      }
+    }
+  }
+
+  resumeSession(sessionId: string): void {
+    this.pausedSessionIds.delete(sessionId)
+    this.sessionAbortControllers.delete(sessionId)
+  }
+
+  private sessionSignal(sessionId: string): AbortSignal {
+    let controller = this.sessionAbortControllers.get(sessionId)
+    if (!controller || controller.signal.aborted) {
+      controller = new AbortController()
+      this.sessionAbortControllers.set(sessionId, controller)
+    }
+    return controller.signal
+  }
+
+  private async trackSessionOperation(sessionId: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.activeSessionOperations.get(sessionId) ?? Promise.resolve()
+    const current = previous.then(operation)
+    this.activeSessionOperations.set(sessionId, current)
+    try {
+      await current
+    } finally {
+      if (this.activeSessionOperations.get(sessionId) === current) this.activeSessionOperations.delete(sessionId)
+    }
+  }
+
   kick(): void {
     if (this.started) void this.flush()
   }
@@ -110,10 +151,12 @@ export class UploadQueue {
     }
     this.running = true
     const promise = (async () => {
-      this.updateSnapshot({ isUploading: true })
-      try {
-        const chunkMetadata = await ChunkStore.listPendingOrFailedMetadata()
-        for (const metadata of chunkMetadata) {
+        this.updateSnapshot({ isUploading: true })
+        try {
+          const chunkMetadata = await ChunkStore.listPendingOrFailedMetadata()
+          for (const metadata of chunkMetadata) {
+            if (!this.started) break
+            if (this.pausedSessionIds.has(metadata.sessionId)) continue
           if (metadata.uploadStatus === 'FAILED' && !canRetryNow(metadata.retryCount, metadata.lastUploadAttemptAt)) continue
           // Keep only one audio Blob in memory while recovering a large
           // offline queue. The metadata query above is intentionally Blob-free.
@@ -121,16 +164,18 @@ export class UploadQueue {
           if (!chunk || !['PENDING', 'FAILED'].includes(chunk.uploadStatus)) continue
           if (chunk.uploadStatus === 'FAILED' && !canRetryNow(chunk.retryCount, chunk.lastUploadAttemptAt)) continue
           try {
-            await this.uploadChunk(chunk)
+            await this.trackSessionOperation(metadata.sessionId, () => this.uploadChunk(chunk))
           } catch {
             break
           }
-        }
-        const markers = await MarkerStore.listPendingOrFailed()
-        for (const marker of markers) {
+          }
+          const markers = await MarkerStore.listPendingOrFailed()
+          for (const marker of markers) {
+            if (!this.started) break
+            if (this.pausedSessionIds.has(marker.sessionId)) continue
           if (marker.uploadStatus === 'FAILED' && !canRetryNow(marker.retryCount, marker.lastUploadAttemptAt)) continue
           try {
-            await this.uploadMarker(marker)
+            await this.trackSessionOperation(marker.sessionId, () => this.uploadMarker(marker))
           } catch {
             break
           }
@@ -156,7 +201,7 @@ export class UploadQueue {
     }
     try {
       const health = await ApiClient.checkHealth()
-      const compatible = health.storageSchema === 2 && Boolean(health.capabilities)
+      const compatible = isCompatibleServerHealth(health)
       this.updateSnapshot({ serverOnline: true, serverCompatible: compatible, serverCapabilities: health.capabilities ?? null, lastError: compatible ? '' : '服务器 API 版本过旧，请重启 8000 服务后再进行处理。' })
       if (!compatible) {
         await this.refreshSnapshot()
@@ -165,6 +210,7 @@ export class UploadQueue {
       await this.recoverInFlightUploads()
       const sessions = await SessionStore.list()
       for (const session of sessions) {
+        if (this.pausedSessionIds.has(session.id)) continue
         try {
           await this.reconcileSession(session.id)
         } catch {
@@ -180,7 +226,7 @@ export class UploadQueue {
   private async refreshServerHealth(): Promise<void> {
     try {
       const health = await ApiClient.checkHealth()
-      const compatible = health.storageSchema === 2 && Boolean(health.capabilities)
+      const compatible = isCompatibleServerHealth(health)
       this.updateSnapshot({ serverOnline: true, serverCompatible: compatible, serverCapabilities: health.capabilities ?? null, lastError: compatible ? '' : '服务器 API 版本过旧，请重启 8000 服务后再进行处理。' })
     } catch (error) {
       this.setError(error)
@@ -188,6 +234,7 @@ export class UploadQueue {
   }
 
   async reconcileSession(sessionId: string): Promise<void> {
+    if (this.pausedSessionIds.has(sessionId)) return
     const state = await ApiClient.getUploadState(sessionId)
     const serverChunks = new Map<string, { size: number; sha256: string }>()
     for (const segment of state.segments) {
@@ -211,10 +258,11 @@ export class UploadQueue {
 
   async completeSegment(sessionId: string, segmentId: string): Promise<void> {
     try {
+      if (this.pausedSessionIds.has(sessionId)) return
       await this.flush()
       const chunks = await ChunkStore.listMetadataBySegmentId(segmentId)
       if (chunks.some((chunk) => chunk.uploadStatus !== 'UPLOADED')) throw new Error(`Segment 仍有未上传 Chunk：${segmentId}`)
-      await ApiClient.completeSegment(sessionId, segmentId, chunks.length)
+      await ApiClient.completeSegment(sessionId, segmentId, chunks.length, this.sessionSignal(sessionId))
       this.updateSnapshot({ serverOnline: true, lastError: '' })
     } catch (error) {
       this.setError(error)
@@ -223,10 +271,11 @@ export class UploadQueue {
 
   async completeSession(sessionId: string): Promise<void> {
     try {
+      if (this.pausedSessionIds.has(sessionId)) return
       await this.flush()
       const chunks = await ChunkStore.listMetadataBySessionId(sessionId)
       if (chunks.some((chunk) => chunk.uploadStatus !== 'UPLOADED')) throw new Error(`Session 仍有未上传 Chunk：${sessionId}`)
-      await ApiClient.completeSession(sessionId, chunks.length)
+      await ApiClient.completeSession(sessionId, chunks.length, this.sessionSignal(sessionId))
       this.updateSnapshot({ serverOnline: true, lastError: '' })
     } catch (error) {
       this.setError(error)
@@ -267,9 +316,11 @@ export class UploadQueue {
   }
 
   private async uploadChunk(input: ChunkRecord): Promise<void> {
+    if (this.pausedSessionIds.has(input.sessionId)) return
     const session = await SessionStore.get(input.sessionId)
     const segment = await SegmentStore.get(input.segmentId)
     if (!session || !segment) throw new Error('本地 Session 或 Segment 不存在。')
+    const signal = this.sessionSignal(input.sessionId)
 
     let chunk = input
     if (!chunk.sha256) {
@@ -280,9 +331,9 @@ export class UploadQueue {
     chunk = { ...chunk, uploadStatus: 'UPLOADING', lastUploadAttemptAt: attemptAt }
     await ChunkStore.put(chunk)
     try {
-      await ApiClient.createSession(session)
-      await ApiClient.createSegment(segment)
-      await ApiClient.uploadChunk(chunk)
+      await ApiClient.createSession(session, signal)
+      await ApiClient.createSegment(segment, signal)
+      await ApiClient.uploadChunk(chunk, signal)
       await ChunkStore.put({ ...chunk, uploadStatus: 'UPLOADED', uploadedAt: Date.now() })
       this.updateSnapshot({ serverOnline: true, lastError: '' })
     } catch (error) {
@@ -299,14 +350,16 @@ export class UploadQueue {
   }
 
   private async uploadMarker(input: MarkerRecord): Promise<void> {
+    if (this.pausedSessionIds.has(input.sessionId)) return
     const attemptAt = Date.now()
     const marker = { ...input, uploadStatus: 'UPLOADING' as const, lastUploadAttemptAt: attemptAt }
+    const signal = this.sessionSignal(marker.sessionId)
     await MarkerStore.put(marker)
     try {
       const session = await SessionStore.get(marker.sessionId)
       if (!session) throw new Error('Marker 所属 Session 不存在。')
-      await ApiClient.createSession(session)
-      await ApiClient.uploadMarker(marker)
+      await ApiClient.createSession(session, signal)
+      await ApiClient.uploadMarker(marker, signal)
       await MarkerStore.put({ ...marker, uploadStatus: 'UPLOADED', uploadedAt: Date.now() })
       this.updateSnapshot({ serverOnline: true, lastError: '' })
     } catch (error) {
@@ -333,20 +386,22 @@ export class UploadQueue {
   private async finalizeCompletedSessions(): Promise<void> {
     const sessions = (await SessionStore.list()).filter((session) => session.status === 'COMPLETED')
     for (const session of sessions) {
+      if (this.pausedSessionIds.has(session.id)) continue
       try {
+        const signal = this.sessionSignal(session.id)
         const [segments, chunks] = await Promise.all([
           SegmentStore.listBySessionId(session.id),
           ChunkStore.listMetadataBySessionId(session.id),
         ])
         if (chunks.some((chunk) => chunk.uploadStatus !== 'UPLOADED')) continue
 
-        await ApiClient.createSession(session)
+        await ApiClient.createSession(session, signal)
         for (const segment of segments) {
           const segmentChunks = chunks.filter((chunk) => chunk.segmentId === segment.id)
-          await ApiClient.createSegment(segment)
-          if (segment.status === 'COMPLETED') await ApiClient.completeSegment(session.id, segment.id, segmentChunks.length)
+          await ApiClient.createSegment(segment, signal)
+          if (segment.status === 'COMPLETED') await ApiClient.completeSegment(session.id, segment.id, segmentChunks.length, signal)
         }
-        await ApiClient.completeSession(session.id, chunks.length)
+        await ApiClient.completeSession(session.id, chunks.length, signal)
         this.updateSnapshot({ serverOnline: true, lastError: '' })
       } catch (error) {
         this.setError(error)

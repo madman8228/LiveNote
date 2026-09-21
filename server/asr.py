@@ -31,6 +31,8 @@ def _measure_audio_volume(audio_path: Path) -> dict[str, float | None]:
             [FFMPEG, '-hide_banner', '-i', str(audio_path), '-af', 'volumedetect', '-f', 'null', '-'],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=120,
             check=False,
         )
@@ -84,7 +86,7 @@ def _prepare_audio_for_asr(audio_path: Path, start_seconds: float = 0, duration_
     if duration_seconds is not None:
         command[-1:-1] = ['-t', f'{duration_seconds:.3f}']
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300, check=False)
     except FileNotFoundError as error:
         prepared_path.unlink(missing_ok=True)
         raise AsrError(f'未找到 FFmpeg：{FFMPEG}。请安装 FFmpeg 或设置 LIVENOTE_FFMPEG。') from error
@@ -104,6 +106,8 @@ def _probe_duration_seconds(audio_path: Path) -> float:
             [FFPROBE, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', str(audio_path)],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=60,
             check=False,
         )
@@ -155,7 +159,7 @@ def _transcribe_prepared(model: Any, device: str, prepared_path: Path, language:
     try:
         result = model.transcribe(
             str(prepared_path),
-            language=language,
+            language=None if language in {'', 'auto'} else language,
             task='transcribe',
             fp16=device == 'cuda',
             # Let Whisper retry low-confidence/over-compressed segments with
@@ -258,6 +262,43 @@ def transcribe(audio_path: Path, model_name: str = DEFAULT_MODEL, language: str 
         'text': ' '.join(segment['text'] for segment in normalised_segments).strip(),
         'segments': segments,
         'chunked': False,
+    }
+
+
+def transcribe_range(
+    audio_path: Path,
+    start_seconds: float,
+    duration_seconds: float,
+    model_name: str = DEFAULT_MODEL,
+    language: str = 'auto',
+) -> dict[str, Any]:
+    """Transcribe one durable processing part without loading the full recording.
+
+    The model is cached in-process, while the audio preparation and result are
+    bounded to the requested range.  This is the primitive used by the
+    restartable processor; callers can persist each returned part before
+    moving to the next one.
+    """
+    if not audio_path.is_file():
+        raise AsrError(f'音频文件不存在：{audio_path}')
+    if start_seconds < 0 or duration_seconds <= 0:
+        raise AsrError('ASR 分段范围无效。')
+    model, device = _load_model(model_name)
+    prepared_path = _prepare_audio_for_asr(audio_path, start_seconds, duration_seconds)
+    try:
+        result = _transcribe_prepared(model, device, prepared_path, language)
+    finally:
+        prepared_path.unlink(missing_ok=True)
+    offset_ms = round(start_seconds * 1000)
+    segments = [{**segment, 'index': index} for index, segment in enumerate(_normalise_segments(result, offset_ms))]
+    return {
+        'model': model_name,
+        'device': device,
+        'language': result.get('language') or (language if language not in {'', 'auto'} else 'auto'),
+        'text': ' '.join(segment['text'] for segment in segments).strip(),
+        'segments': segments,
+        'startMs': offset_ms,
+        'durationMs': round(duration_seconds * 1000),
     }
 
 

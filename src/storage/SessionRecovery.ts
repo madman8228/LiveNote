@@ -1,6 +1,7 @@
 import { ChunkStore } from './ChunkStore'
 import { SegmentStore } from './SegmentStore'
 import { SessionStore } from './SessionStore'
+import type { PlaybackDiagnosticsSink } from '../diagnostics/PlaybackDiagnostics'
 
 export interface RestoredSession {
   blob: Blob
@@ -15,6 +16,12 @@ export interface RestoredSession {
 export interface SessionPlayback extends RestoredSession {
   url: string
   playbackMode: 'media-source' | 'blob-fallback' | 'server-ffmpeg'
+}
+
+export interface SessionPlaybackProgress {
+  phase: 'loading' | 'appending' | 'ready'
+  completedChunks: number
+  totalChunks: number
 }
 
 interface SessionData {
@@ -84,8 +91,10 @@ export async function restoreSession(sessionId: string): Promise<RestoredSession
   }
 }
 
-export async function createSessionPlayback(sessionId: string, onUrlReady?: (url: string) => void): Promise<SessionPlayback> {
+export async function createSessionPlayback(sessionId: string, onUrlReady?: (url: string) => void, diagnostics?: PlaybackDiagnosticsSink, onProgress?: (progress: SessionPlaybackProgress) => void): Promise<SessionPlayback> {
   const data = await loadSessionData(sessionId)
+  onProgress?.({ phase: 'loading', completedChunks: 0, totalChunks: data.chunks.length })
+  diagnostics?.preparation('local-session-data-loaded', { segmentCount: data.segmentCount, chunkCount: data.chunks.length, totalBytes: data.totalBytes, durationMs: data.durationMs, mimeType: data.mimeType, hasGaps: data.hasGaps })
   const base = {
     segmentCount: data.segmentCount,
     chunkCount: data.chunks.length,
@@ -98,6 +107,7 @@ export async function createSessionPlayback(sessionId: string, onUrlReady?: (url
   if (data.chunks.length && typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(data.mimeType)) {
     const mediaSource = new MediaSource()
     const url = URL.createObjectURL(mediaSource)
+    diagnostics?.preparation('playback-mode-selected', { mode: 'media-source', mimeType: data.mimeType })
     onUrlReady?.(url)
     let mediaDurationMs = data.durationMs
 
@@ -111,9 +121,16 @@ export async function createSessionPlayback(sessionId: string, onUrlReady?: (url
         const open = async () => {
           if (timedOut) return
           try {
+            diagnostics?.recordMediaSource('sourceopen', { mimeType: data.mimeType })
             const sourceBuffer = mediaSource.addSourceBuffer(data.mimeType)
-            try { sourceBuffer.mode = 'sequence' } catch { /* Browser default is acceptable. */ }
-            for (const chunk of data.chunks) await appendBuffer(sourceBuffer, await chunk.blob.arrayBuffer())
+            try { sourceBuffer.mode = 'sequence'; diagnostics?.recordMediaSource('mode', { mode: sourceBuffer.mode }) } catch { diagnostics?.recordMediaSource('mode-error', { requestedMode: 'sequence' }) }
+            for (const [chunkIndex, chunk] of data.chunks.entries()) {
+              diagnostics?.recordMediaSource('append-start', { chunkIndex, chunkBytes: chunk.size })
+              await appendBuffer(sourceBuffer, await chunk.blob.arrayBuffer())
+              const bufferedEnd = sourceBuffer.buffered.length > 0 ? sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1) : 0
+              diagnostics?.recordMediaSource('append-end', { chunkIndex, bufferedEnd })
+              onProgress?.({ phase: 'appending', completedChunks: chunkIndex + 1, totalChunks: data.chunks.length })
+            }
 
             if (mediaSource.readyState === 'open') {
               const bufferedEnd = sourceBuffer.buffered.length > 0
@@ -123,11 +140,13 @@ export async function createSessionPlayback(sessionId: string, onUrlReady?: (url
               if (durationSeconds > 0) {
                 mediaSource.duration = durationSeconds
                 mediaDurationMs = durationSeconds * 1000
+                diagnostics?.recordMediaSource('duration-set', { durationSeconds, bufferedEnd })
               }
             }
-            if (mediaSource.readyState === 'open') mediaSource.endOfStream()
+            if (mediaSource.readyState === 'open') { mediaSource.endOfStream(); diagnostics?.recordMediaSource('end-of-stream') }
+            onProgress?.({ phase: 'ready', completedChunks: data.chunks.length, totalChunks: data.chunks.length })
             resolve()
-          } catch (error) { reject(error) }
+          } catch (error) { diagnostics?.recordMediaSource('error', { errorCategory: error instanceof Error && error.name === 'QuotaExceededError' ? 'quota' : 'media-source' }); reject(error) }
           finally { window.clearTimeout(timeoutId) }
         }
 
@@ -136,11 +155,13 @@ export async function createSessionPlayback(sessionId: string, onUrlReady?: (url
       })
 
       return { ...base, durationMs: mediaDurationMs, blob: new Blob(), url, playbackMode: 'media-source' }
-    } catch { URL.revokeObjectURL(url) }
+    } catch { diagnostics?.preparation('playback-fallback', { from: 'media-source', reason: 'media-source-initialization-failed' }); URL.revokeObjectURL(url) }
   }
 
   const fallback = await restoreSession(sessionId)
   const fallbackUrl = URL.createObjectURL(fallback.blob)
+  diagnostics?.preparation('playback-mode-selected', { mode: 'blob-fallback', mimeType: fallback.mimeType })
   onUrlReady?.(fallbackUrl)
+  onProgress?.({ phase: 'ready', completedChunks: fallback.chunkCount, totalChunks: fallback.chunkCount })
   return { ...fallback, url: fallbackUrl, playbackMode: 'blob-fallback' }
 }

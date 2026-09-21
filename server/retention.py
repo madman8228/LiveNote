@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,13 @@ def delete_session_data(data_dir: Path, db_path: Path, session_id: str) -> dict[
     connection = sqlite3.connect(db_path)
     try:
         connection.row_factory = sqlite3.Row
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.execute('''
+            CREATE TABLE IF NOT EXISTS deleted_sessions (
+                session_id TEXT PRIMARY KEY,
+                deleted_at INTEGER NOT NULL
+            )
+        ''')
         session = connection.execute('SELECT id FROM sessions WHERE id = ?', (session_id,)).fetchone()
         if session is None:
             raise KeyError(session_id)
@@ -46,6 +54,12 @@ def delete_session_data(data_dir: Path, db_path: Path, session_id: str) -> dict[
         chunks = connection.execute('SELECT local_path FROM chunks WHERE session_id = ?', (session_id,)).fetchall()
         file_paths.extend(_safe_data_path(data_dir, str(row['local_path'])) for row in chunks)
 
+        # Keep a durable tombstone so a delayed phone upload cannot recreate
+        # the Session after the delete transaction has committed.
+        connection.execute(
+            'INSERT OR REPLACE INTO deleted_sessions(session_id, deleted_at) VALUES (?, ?)',
+            (session_id, int(time.time() * 1000)),
+        )
         connection.execute('DELETE FROM chunks WHERE session_id = ?', (session_id,))
         connection.execute('DELETE FROM markers WHERE session_id = ?', (session_id,))
         connection.execute('DELETE FROM segments WHERE session_id = ?', (session_id,))
@@ -61,6 +75,7 @@ def delete_session_data(data_dir: Path, db_path: Path, session_id: str) -> dict[
         data_dir / 'sessions' / session_id,
         data_dir / 'reconstructed' / 'sessions' / session_id,
         data_dir / 'processed' / 'sessions' / session_id,
+        data_dir / 'processed' / 'live' / session_id,
     ]
     for root in session_roots:
         _safe_data_path(data_dir, str(root.relative_to(data_dir)))

@@ -1,0 +1,32 @@
+flowchart LR
+  Phone["手机 B · LiveNote PWA"]
+  Server["LiveNote 服务器\n音频 / 任务 / 结果"]
+  Queue["待处理任务队列"]
+  Puller["本地电脑任务拉取器\n手动触发或常驻运行"]
+  Inbox["本地音频目录\n待处理作业"]
+  Chat["聊天中的 AI 工作台\n用户告知目录与作业数量"]
+  Result["本地结果目录\n转写 / 知识结构 / 总结"]
+  Review["人工确认回传"]
+  Knowledge["手机知识卡页面\n编辑 / 换背景 / 截图"]
+
+  Phone -->|录音 Chunk 自动上传| Server
+  Server -->|上传完成后创建任务| Queue
+  Puller -->|查询并领取任务| Queue
+  Puller -->|下载整场音频| Inbox
+  Inbox -->|告知目录和待处理数量| Chat
+  Chat -->|批量读取并处理音频| Inbox
+  Chat -->|生成结构化结果| Result
+  Result --> Review
+  Review -->|上传结果并更新状态| Server
+  Phone -->|上线后查询自己的结果| Server
+  Server -->|返回对应 Session 的总结| Knowledge
+  Knowledge -->|用户修改或截图发布| Phone
+
+  classDef phone fill:#dcebdc,stroke:#2d6847,color:#17303b;
+  classDef server fill:#dce9f3,stroke:#2b5d7d,color:#17303b;
+  classDef local fill:#f3e6c6,stroke:#9d7224,color:#3b2c13;
+  classDef chat fill:#eadcf3,stroke:#77508e,color:#321c3b;
+  class Phone,Knowledge phone;
+  class Server,Queue server;
+  class Puller,Inbox,Result,Review local;
+  class Chat chat;

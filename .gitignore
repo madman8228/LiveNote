@@ -10,7 +10,10 @@ server/.env
 server/.env.*
 !server/.env.example
 server/livenote.sqlite3
+server/livenote.sqlite3-shm
+server/livenote.sqlite3-wal
 __pycache__/
 *.pyc
 server/data/*
 !server/data/.gitkeep
+worker-inbox/

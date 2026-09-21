@@ -1,0 +1,25 @@
+flowchart LR
+  P[手机 PWA\n只录音、上传、查看结果]
+  A[电脑管理台\n用户 / 会话 / 任务 / 结果]
+  W[本地任务桥接器\n领取音频、回传 JSON]
+  S[LiveNote 服务器 API\n鉴权 / 任务 / 文件 / 结果]
+  D[(SQLite + 音频文件\n+ knowledge.json)]
+  C[ChatGPT / Codex 对话\n人工触发内容处理]
+
+  P <--> S
+  A <--> S
+  W <--> S
+  S <--> D
+  W --> C
+  C --> W
+
+  classDef mobile fill:#173348,stroke:#c2f258,color:#f4f8ee
+  classDef control fill:#263b4a,stroke:#8edfbf,color:#f4f8ee
+  classDef server fill:#102333,stroke:#85b9ff,color:#f4f8ee
+  classDef data fill:#1e2935,stroke:#ffc978,color:#f4f8ee
+  classDef agent fill:#362e4d,stroke:#d0a9ff,color:#f4f8ee
+  class P mobile
+  class A,W control
+  class S server
+  class D data
+  class C agent

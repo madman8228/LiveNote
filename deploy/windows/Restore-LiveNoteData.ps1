@@ -15,4 +15,4 @@ if ($VerifyOnly) { $arguments += '--verify-only' }
 if ($Replace) { $arguments += '--replace' }
 
 & $Python @arguments
-if ($LASTEXITCODE -ne 0) { throw "LiveNote 备份操作失败，退出码：$LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "LiveNote restore operation failed (exit code: $LASTEXITCODE)." }

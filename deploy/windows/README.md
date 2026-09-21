@@ -16,30 +16,13 @@
 .\deploy\windows\Run-LiveNoteReleaseChecks.ps1 -SkipApi
 ```
 
-正式发布时可额外要求音频处理和语义总结能力：
-
-```powershell
-.\deploy\windows\Run-LiveNoteReleaseChecks.ps1 `
-  -RequireProcessing -RequireLlm -ApiKey $env:LIVENOTE_API_KEY
-```
-
 ## 检查当前 API
 
 ```powershell
 .\deploy\windows\Check-LiveNoteApi.ps1
 ```
 
-如果要在发布前同时确认音频重建和 ASR 已就绪：
-
-```powershell
-.\deploy\windows\Check-LiveNoteApi.ps1 -RequireProcessing
-```
-
-如果还要求必须能生成语义总结：
-
-```powershell
-.\deploy\windows\Check-LiveNoteApi.ps1 -RequireProcessing -RequireLlm -ApiKey $env:LIVENOTE_API_KEY
-```
+检查会确认当前 API 版本、存储结构、FFmpeg/FFprobe 和本机自动转写能力已启用。
 
 生产环境启用了 API Key 时，把 Key 只通过参数临时传入，不要写入仓库：
 
@@ -47,9 +30,19 @@
 .\deploy\windows\Check-LiveNoteApi.ps1 -ApiKey $env:LIVENOTE_API_KEY
 ```
 
-如果返回的 JSON 没有 `storageSchema: 2` 和 `capabilities`，说明 8000 仍运行旧服务。
+如果返回的 JSON 没有 `storageSchema: 5` 和 `capabilities`，说明 8000 仍运行旧服务。
 
 ## 启动当前代码
+
+启动完整的本机开发闭环（API、后台转写器、手机 HTTPS 页面和电脑控制台）：
+
+```powershell
+.\deploy\windows\Start-LiveNote.ps1
+```
+
+脚本会复用已经运行的服务，不会重复启动；手机地址会在输出中显示为
+`https://电脑局域网IP:5173/`。手机和电脑必须连接同一 Wi-Fi，开发环境的 HTTPS
+证书首次访问时需要在手机浏览器中确认继续访问。
 
 确认 8000 没有被占用后：
 

@@ -2,8 +2,14 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
+const runtimeProcess = (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process
+const buildId = runtimeProcess?.env?.LIVENOTE_BUILD_ID || `dev-${new Date().toISOString()}`
+
 export default defineConfig({
   plugins: [vue(), basicSsl()],
+  define: {
+    __LIVENOTE_BUILD_ID__: JSON.stringify(buildId),
+  },
   server: {
     host: true,
     port: 5173,

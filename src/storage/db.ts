@@ -1,5 +1,5 @@
 const DB_NAME = 'livenote-db'
-const DB_VERSION = 3
+const DB_VERSION = 6
 
 export const STORE_NAMES = {
   sessions: 'sessions',
@@ -7,6 +7,8 @@ export const STORE_NAMES = {
   chunks: 'chunks',
   markers: 'markers',
   lifecycleEvents: 'lifecycleEvents',
+  results: 'results',
+  resultDrafts: 'resultDrafts',
 } as const
 
 let databasePromise: Promise<IDBDatabase> | null = null
@@ -58,6 +60,18 @@ export function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(STORE_NAMES.lifecycleEvents, { keyPath: 'id' })
         store.createIndex('sessionId', 'sessionId', { unique: false })
         store.createIndex('wallClockMs', 'wallClockMs', { unique: false })
+      }
+
+      if (!database.objectStoreNames.contains(STORE_NAMES.results)) {
+        const store = database.createObjectStore(STORE_NAMES.results, { keyPath: 'sessionId' })
+        store.createIndex('ownerId', 'ownerId', { unique: false })
+        store.createIndex('updatedAt', 'updatedAt', { unique: false })
+      }
+
+      if (!database.objectStoreNames.contains(STORE_NAMES.resultDrafts)) {
+        const store = database.createObjectStore(STORE_NAMES.resultDrafts, { keyPath: 'sessionId' })
+        store.createIndex('ownerId', 'ownerId', { unique: false })
+        store.createIndex('updatedAt', 'updatedAt', { unique: false })
       }
 
       if (oldVersion < 2 && request.transaction) {
@@ -115,7 +129,7 @@ export function transactionDone(transaction: IDBTransaction): Promise<void> {
   })
 }
 
-export async function putRecord<T extends { id: string }>(storeName: string, record: T): Promise<void> {
+export async function putRecord<T extends object>(storeName: string, record: T): Promise<void> {
   const database = await openDatabase()
   const transaction = database.transaction(storeName, 'readwrite')
   const persistableRecord = storeName === STORE_NAMES.segments
@@ -199,6 +213,38 @@ export async function deleteRecord(storeName: string, id: string): Promise<void>
   const database = await openDatabase()
   const transaction = database.transaction(storeName, 'readwrite')
   transaction.objectStore(storeName).delete(id)
+  await transactionDone(transaction)
+}
+
+export async function deleteSessionData(sessionId: string): Promise<void> {
+  const database = await openDatabase()
+  const storeNames = [
+    STORE_NAMES.sessions,
+    STORE_NAMES.segments,
+    STORE_NAMES.chunks,
+    STORE_NAMES.markers,
+    STORE_NAMES.lifecycleEvents,
+    STORE_NAMES.results,
+    STORE_NAMES.resultDrafts,
+  ]
+  const transaction = database.transaction(storeNames, 'readwrite')
+  for (const [storeName, indexName] of [
+    [STORE_NAMES.segments, 'sessionId'],
+    [STORE_NAMES.chunks, 'sessionId'],
+    [STORE_NAMES.markers, 'sessionId'],
+    [STORE_NAMES.lifecycleEvents, 'sessionId'],
+  ] as const) {
+    const request = transaction.objectStore(storeName).index(indexName).openCursor(sessionId)
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      cursor.delete()
+      cursor.continue()
+    }
+  }
+  transaction.objectStore(STORE_NAMES.sessions).delete(sessionId)
+  transaction.objectStore(STORE_NAMES.results).delete(sessionId)
+  transaction.objectStore(STORE_NAMES.resultDrafts).delete(sessionId)
   await transactionDone(transaction)
 }
 

@@ -72,3 +72,30 @@ export interface LifecycleEventRecord {
   elapsedMs: number
   visibilityState: DocumentVisibilityState
 }
+
+export interface PublishedResultRecord {
+  sessionId: string
+  ownerId: string | null
+  revisionId: string | null
+  version: number
+  status: string
+  updatedAt: number
+  result: Record<string, unknown>
+}
+
+export interface ResultDraftRecord {
+  sessionId: string
+  ownerId: string | null
+  baseRevisionId: string | null
+  updatedAt: number
+  summary: {
+    title: string
+    overview: string
+    keyPoints: string[]
+    knowledgeStructure: Array<{ title: string; points: string[] }>
+    questions: Array<{ question: string; answer: string; startMs: number | null }>
+    actionItems: string[]
+    entities: string[]
+    confidenceNotes: string[]
+  }
+}

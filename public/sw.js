@@ -1,4 +1,4 @@
-const CACHE_NAME = 'livenote-shell-v1'
+const CACHE_NAME = 'livenote-shell-v2'
 const SHELL = ['/', '/index.html']
 
 self.addEventListener('install', (event) => {

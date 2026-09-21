@@ -9,5 +9,5 @@ $destinationPath = [System.IO.Path]::GetFullPath($Destination)
 
 & $Python (Join-Path $projectRoot 'server\backup.py') --destination $destinationPath
 if ($LASTEXITCODE -ne 0) {
-  throw "LiveNote 数据备份失败（exit code: $LASTEXITCODE）。"
+  throw "LiveNote data backup failed (exit code: $LASTEXITCODE)."
 }

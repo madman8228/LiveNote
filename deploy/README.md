@@ -32,24 +32,28 @@ Nginx 可以直接参考 [`nginx/livenote.conf.example`](./nginx/livenote.conf.e
 LIVENOTE_ENV=production
 LIVENOTE_CORS_ORIGINS=https://你的域名
 LIVENOTE_API_KEY=随机长密钥
+LIVENOTE_ADMIN_USERNAME=管理员账号
+LIVENOTE_ADMIN_PASSWORD=独立的管理员密码
+# 旧版部署迁移期间可暂时保留 LIVENOTE_ADMIN_TOKEN
+LIVENOTE_WORKER_TOKEN=独立的 Worker 密钥
 LIVENOTE_DATA_DIR=/var/lib/livenote/data
 LIVENOTE_DB_PATH=/var/lib/livenote/livenote.sqlite3
-LIVENOTE_WHISPER_MODEL=base
-LIVENOTE_WHISPER_CACHE=/var/lib/livenote/models
 ```
 
-如果需要语义总结，再加入 `LIVENOTE_LLM_BASE_URL`、`LIVENOTE_LLM_API_KEY` 和
-`LIVENOTE_LLM_MODEL`。该文件应限制为 API 服务用户可读，不能提交到 Git。
+当前版本不在服务器上运行 Whisper、ASR 或 LLM。音频由电脑端领取后交给
+ChatGPT/Codex 人工处理，再通过控制台回传 `knowledge.json`。密钥文件应限制为
+API 服务用户可读，不能提交到 Git。
 
 部署后的最低检查顺序：
 
 1. 浏览器访问 `https://你的域名/`。
 2. 确认浏览器能力检测和麦克风授权正常。
 3. 录制 30 秒，确认 Chunk 上传到 API。
-4. 点击本地处理，确认后台任务完成并能读取报告。
-5. 再进行长时间录音。
+4. 在 PC 控制台完成“领取到本机 → 开始处理 → 回传结果 → 发布”。
+5. 手机刷新会话，确认只显示已发布的知识总结。
+6. 再进行长时间录音。
 
-Windows 本地可先运行 `deploy\windows\Run-LiveNoteReleaseChecks.ps1`，一次完成构建、后端测试、编译、依赖和安全检查；正式发布时再附加 `-RequireProcessing -RequireLlm`。
+Windows 本地可先运行 `deploy\windows\Run-LiveNoteReleaseChecks.ps1`，一次完成构建、后端测试和编译检查。
 
 正式运行前还应设置定期备份。Windows 本机可在暂停上传后执行 `python server/backup.py --destination D:\LiveNoteBackups`；Linux 环境建议由定时任务调用同一脚本，并把备份目录放在独立磁盘或远程备份位置。
 
