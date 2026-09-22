@@ -411,9 +411,11 @@ async function retryTask(task: ProcessingTask): Promise<void> {
   requestingTaskId.value = task.id; error.value = ''; message.value = ''
   try {
     ApiClient.setAdminToken(adminToken.value)
-    await ApiClient.adminRetryTask(task.id)
+    const retry = await ApiClient.adminRetryTask(task.id)
     await refresh()
-    message.value = '失败任务已重置，Worker 会自动领取。'
+    message.value = retry.status === 'TRANSCRIBED'
+      ? '总结失败任务已重置，Codex Bridge 会自动重新生成总结。'
+      : '失败任务已重置，Worker 会自动领取。'
   } catch (cause) { error.value = controlError(cause, '重试任务失败。') }
   finally { requestingTaskId.value = null }
 }

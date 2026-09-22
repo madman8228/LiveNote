@@ -27,7 +27,7 @@ def _events_path() -> Path:
     return RUNTIME_DIR / f'worker-events{suffix}.jsonl'
 
 
-def update_status(service: str, phase: str, message: str, *, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
+def update_status(service: str, phase: str, message: str, *, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', summary: dict[str, Any] | None = None, next_poll_at: int | None = None, record_event: bool = True) -> None:
     """Write a dashboard-safe status snapshot and optionally append a task event."""
     now = int(time.time() * 1000)
     snapshot: dict[str, Any] = {
@@ -40,6 +40,10 @@ def update_status(service: str, phase: str, message: str, *, task: dict[str, Any
         'progress': progress or None,
         'error': error,
     }
+    if summary:
+        snapshot['summary'] = summary
+    if next_poll_at is not None:
+        snapshot['nextPollAt'] = int(next_poll_at)
     if SOURCE_ID:
         snapshot['sourceId'] = SOURCE_ID
     if SOURCE_LABEL:

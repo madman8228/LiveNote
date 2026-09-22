@@ -40,7 +40,7 @@ POLL_SECONDS = max(60, int(os.environ.get('LIVENOTE_WORKER_POLL_SECONDS', '300')
 HEARTBEAT_SECONDS = max(60, int(os.environ.get('LIVENOTE_WORKER_HEARTBEAT_SECONDS', '300')))
 
 
-def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
+def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', next_poll_at: int | None = None, record_event: bool = True) -> None:
     task_snapshot = None
     if task:
         task_snapshot = {
@@ -53,9 +53,13 @@ def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, 
             'startedAt': task.get('startedAt'),
             'durationMs': task.get('durationMs'),
             'status': task.get('status'),
-            'durationMs': task.get('durationMs'),
+            'claimedAt': task.get('claimedAt'),
+            'downloadedAt': task.get('downloadedAt'),
+            'updatedAt': task.get('updatedAt'),
+            'errorMessage': task.get('errorMessage'),
+            'errorStage': task.get('errorStage'),
         }
-    update_status('worker', phase, message, task=task_snapshot, progress=progress, error=error, record_event=record_event)
+    update_status('worker', phase, message, task=task_snapshot, progress=progress, error=error, next_poll_at=next_poll_at, record_event=record_event)
 
 
 def request_json(server: str, path: str, method: str = 'GET', payload: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
@@ -649,15 +653,17 @@ def watch_storage_tasks(args: argparse.Namespace) -> int:
     try:
         while True:
             process_storage_tasks(args)
-            report_worker('waiting', '等待新的录音任务。', record_event=False)
-            next_poll = time.monotonic() + max(2, args.interval)
+            interval_seconds = max(2, args.interval)
+            next_poll = time.monotonic() + interval_seconds
+            next_poll_at = int(time.time() * 1000) + interval_seconds * 1000
+            report_worker('waiting', '等待新的录音任务。', next_poll_at=next_poll_at, record_event=False)
             while True:
                 remaining = next_poll - time.monotonic()
                 if remaining <= 0:
                     break
                 time.sleep(min(30, remaining))
                 if time.monotonic() < next_poll:
-                    report_worker('waiting', '等待新的录音任务。', record_event=False)
+                    report_worker('waiting', '等待新的录音任务。', next_poll_at=next_poll_at, record_event=False)
     except KeyboardInterrupt:
         report_worker('stopped', '本地 Worker 已停止。')
         print('Storage Worker 已停止。')
@@ -717,7 +723,17 @@ def watch_tasks(args: argparse.Namespace) -> int:
                             task_path.write_text(json.dumps(refreshed['task'], ensure_ascii=False, indent=2), encoding='utf-8')
                     except RuntimeError as error:
                         print(f'租约续期失败 {task["id"]}: {error}', file=sys.stderr)
-            time.sleep(args.interval)
+            interval_seconds = max(2, args.interval)
+            next_poll_at = int(time.time() * 1000) + interval_seconds * 1000
+            report_worker('waiting', '等待新的录音任务。', next_poll_at=next_poll_at, record_event=False)
+            deadline = time.monotonic() + interval_seconds
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(30, remaining))
+                if time.monotonic() < deadline:
+                    report_worker('waiting', '等待新的录音任务。', next_poll_at=next_poll_at, record_event=False)
     except KeyboardInterrupt:
         print('Worker 已停止。')
         return 0

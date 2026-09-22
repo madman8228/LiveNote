@@ -578,12 +578,18 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .marker-note-input::placeholder { color: var(--muted); }
 .marker-actions button:not(:disabled):active { border-color: var(--accent); color: var(--accent); }
 .marker-actions small { color: var(--muted); font-size: 10px; }
+.live-markers { display: grid; min-width: 0; gap: 9px; }
+.live-marker-note-row { display: grid; min-width: 0; gap: 6px; }
+.live-marker-note-row .marker-note-input { width: 100%; min-width: 0; }
+.live-marker-button-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; gap: 8px; }
 .live-markers .field-label,
 .live-markers .marker-note-input,
 .live-markers button,
-.live-markers small { font-size: 26px; }
+.live-markers small { font-size: 16px; }
 .live-markers .marker-note-input,
-.live-markers button { min-height: 52px; }
+.live-markers button { min-height: 48px; }
+.live-markers button { width: 100%; min-width: 0; padding-inline: 8px; overflow-wrap: anywhere; }
+.live-markers small { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
 .marker-list, .marker-history-list { display: grid; gap: 6px; margin-top: 10px; }
 .marker-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
 .marker-item { border-top: 1px solid var(--line); }

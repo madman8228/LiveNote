@@ -8,6 +8,33 @@ from tools import livenote_worker_dashboard as dashboard
 
 
 class WorkerDashboardSourceTests(unittest.TestCase):
+    def test_recent_events_merges_remote_structured_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            (runtime / 'worker-events.jsonl').write_text(
+                json.dumps({
+                    'service': 'worker',
+                    'phase': 'completed',
+                    'message': '总结已生成，等待审核。',
+                    'updatedAt': 10,
+                    'task': {
+                        'id': 'task-remote',
+                        'title': '云端任务',
+                        'status': 'REVIEW',
+                    },
+                }, ensure_ascii=False) + '\n',
+                encoding='utf-8',
+            )
+            with patch.object(dashboard, 'RUNTIME_DIR', runtime), \
+                 patch.object(dashboard, 'fetch_remote_summary', return_value={
+                     'title': '结构化总结',
+                     'overview': '总结内容已从 ECS 同步。',
+                 }) as fetch_remote_summary:
+                records = dashboard.recent_events()
+
+        self.assertEqual(records[0]['summary']['title'], '结构化总结')
+        fetch_remote_summary.assert_called_once_with('task-remote', '')
+
     def test_local_and_ecs_server_health_are_reported_separately(self) -> None:
         class Response:
             def __init__(self, payload: dict) -> None:

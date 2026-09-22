@@ -23,7 +23,8 @@
     .dashboard-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
     .panel { border:1px solid var(--line); border-radius:12px; background:rgba(16,36,49,.88); box-shadow:0 12px 36px rgba(0,0,0,.14); }
     .service { padding:18px; min-height:130px; }
-    .service-head { display:flex; align-items:center; gap:9px; }
+    .service-head { display:flex; align-items:center; gap:9px; min-width:0; }
+    .service-head h2 { min-width:0; }
     .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 4px rgba(159,184,186,.12); }
     .dot.online { background:var(--green); box-shadow:0 0 0 4px rgba(142,224,191,.13); }
     .dot.busy { background:var(--blue); box-shadow:0 0 0 4px rgba(145,201,255,.13); }
@@ -34,6 +35,11 @@
     .service h2 { font-size:18px; }
     .service-state { margin-top:13px; color:var(--accent); font-weight:650; }
     .service-message { margin-top:4px; color:var(--muted); font-size:12px; }
+    .service-head-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; min-width:0; margin-left:auto; }
+    .service-head-actions button { min-height:30px; padding:3px 10px; border:1px solid var(--line); border-radius:7px; background:transparent; color:var(--ink); cursor:pointer; }
+    .service-head-actions button:hover,.service-head-actions button:focus-visible { border-color:var(--accent); color:var(--accent); }
+    .service-head-actions button:disabled { cursor:wait; opacity:.6; }
+    .service-head-action-status { max-width:120px; overflow-wrap:anywhere; color:var(--muted); font-size:11px; text-align:right; }
     .service-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:14px; }
     .service-actions button { min-height:30px; padding:5px 10px; border:1px solid var(--line); border-radius:7px; background:transparent; color:var(--ink); cursor:pointer; }
     .service-actions button:hover,.service-actions button:focus-visible { border-color:var(--accent); color:var(--accent); }
@@ -43,8 +49,9 @@
     .section-head { display:flex; justify-content:space-between; align-items:baseline; gap:14px; margin-bottom:16px; }
     .section h2 { font-size:20px; }
     .section-note { color:var(--muted); font-size:12px; }
-    .current-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-    .current { min-width:0; border:1px solid var(--line); border-radius:9px; background:rgba(19,45,58,.62); padding:16px; }
+    .current-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 28px; }
+    .current { min-width:0; padding:0; border:0; border-radius:0; background:transparent; }
+    .current + .current { border-left:1px solid var(--line); padding-left:28px; }
     .current h3 { font-size:14px; color:var(--blue); }
     .task-title { overflow:hidden; margin-top:10px; color:var(--ink); font-size:17px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
     .task-message { margin-top:6px; color:var(--muted); }
@@ -53,33 +60,55 @@
     .progress.indeterminate span { width:35% !important; opacity:.75; }
     .progress-meta { display:flex; justify-content:space-between; gap:10px; margin-top:6px; color:var(--muted); font-size:11px; }
     .empty { color:var(--muted); }
-    .event-list { display:grid; gap:0; max-height:390px; overflow:auto; }
-    .event { display:grid; grid-template-columns:76px 104px minmax(0,1fr); gap:14px; align-items:start; border-bottom:1px solid rgba(201,224,226,.1); padding:12px 0; }
+    .event-list { display:grid; gap:0; max-height:560px; overflow:auto; }
+    .event { display:grid; grid-template-columns:96px 118px minmax(0,1fr); gap:16px; align-items:start; border-bottom:1px solid rgba(201,224,226,.1); padding:15px 0; }
     .event:last-child { border-bottom:0; }
-    .event-meta,.event-source { padding-top:2px; color:var(--muted); font-size:11px; }
-    .event-meta { font-variant-numeric:tabular-nums; }
-    .event-source { color:var(--accent); }
-    .event-content { min-width:0; display:grid; grid-template-columns:minmax(0,1.5fr) minmax(220px,1fr); gap:9px 22px; }
+    .event-meta,.event-source { display:grid; align-content:start; gap:2px; padding-top:2px; color:var(--muted); font-size:11px; }
+    .event-meta time { color:var(--ink); font-variant-numeric:tabular-nums; line-height:1.35; }
+    .event-meta-label,.event-source-label { color:var(--muted); font-size:10px; }
+    .event-source strong { color:var(--accent); font-size:11px; font-weight:650; overflow-wrap:anywhere; }
+    .event-content { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(180px,30%); gap:10px 22px; }
     .event-title-row { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
     .event-owner { color:var(--accent); font-weight:700; }
     .event-title { min-width:0; color:var(--ink); font-weight:650; overflow-wrap:anywhere; }
-    .event-facts { margin-top:3px; color:var(--muted); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
-    .event-state { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; min-width:0; }
-    .event-status { color:var(--muted); font-size:12px; line-height:1.35; }
+    .event-facts { margin-top:4px; color:var(--muted); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+    .event-state { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:flex-end; gap:6px 12px; min-width:0; text-align:right; }
+    .event-status,.event-action { color:var(--muted); font-size:12px; line-height:1.35; }
+    .event-action { max-width:100%; overflow-wrap:anywhere; }
     .event-status { display:inline-flex; align-items:center; min-height:24px; border:1px solid currentColor; border-radius:999px; padding:2px 8px; font-weight:700; }
     .event-status.active { color:var(--blue); background:rgba(145,201,255,.08); }
     .event-status.done { color:var(--green); background:rgba(142,224,191,.08); }
     .event-status.failed { color:var(--red); background:rgba(255,171,158,.08); }
-    .event-details { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,1fr); gap:8px; min-width:0; }
-    .event-detail { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:8px; min-width:0; color:var(--muted); font-size:12px; line-height:1.4; }
-    .event-detail-label { color:var(--blue); font-weight:650; }
-    .event-detail-value { min-width:0; overflow-wrap:anywhere; }
+    .event-details { grid-column:1 / -1; display:grid; gap:10px; min-width:0; }
+    .event-timeline { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px 16px; border-top:1px solid rgba(201,224,226,.1); padding-top:10px; }
+    .event-detail { display:grid; gap:2px; min-width:0; color:var(--muted); font-size:11px; line-height:1.4; }
+    .event-detail-label { color:var(--blue); font-size:10px; font-weight:650; }
+    .event-detail-value { min-width:0; color:var(--ink); overflow-wrap:anywhere; }
+    .event-result { border-top:1px solid rgba(201,224,226,.1); padding-top:9px; }
+    .event-error .event-detail-label { color:var(--red); }
+    .event-error .event-detail-value { color:var(--red); }
+    .event-structured { border-top:1px solid rgba(201,224,226,.1); padding-top:9px; }
+    .event-structured summary { width:fit-content; cursor:pointer; color:var(--blue); font-size:11px; font-weight:650; }
+    .event-structured-body { display:grid; gap:10px; margin-top:10px; color:var(--muted); font-size:11px; line-height:1.5; }
+    .event-structured-title { color:var(--ink); font-size:14px; font-weight:700; }
+    .event-structured-overview { color:var(--ink); }
+    .event-structured-section { display:grid; gap:4px; }
+    .event-structured-section h4 { margin:0; color:var(--blue); font-size:11px; }
+    .event-structured-list { display:grid; gap:4px; margin:0; padding-left:18px; }
+    .event-structured-list li::marker { color:var(--accent); }
+    .event-structured-knowledge { display:grid; gap:6px; }
+    .event-structured-knowledge strong { color:var(--ink); }
+    .event-structured-qa { display:grid; gap:2px; padding-left:12px; border-left:1px solid var(--line); }
+    .event-structured-qa strong { color:var(--ink); }
+    .event-structured-json { margin-top:2px; }
+    .event-structured-json pre { max-height:260px; margin-top:8px; }
+    .event-structured-empty { color:var(--muted); }
     .log-box { margin-top:16px; }
     .log-box summary { cursor:pointer; color:var(--muted); }
     pre { max-height:230px; overflow:auto; margin:10px 0 0; border:1px solid var(--line); border-radius:8px; background:#081722; padding:12px; color:#c6dad8; font:12px/1.55 Consolas,"Courier New",monospace; white-space:pre-wrap; }
     .footer-note { margin-top:18px; color:var(--muted); font-size:12px; }
-    @media (max-width:920px) { .dashboard-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .event { grid-template-columns:68px 92px minmax(0,1fr); gap:10px; } .event-content { grid-template-columns:1fr; gap:8px; } .event-details { gap:6px; } }
-    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:5px; padding:13px 0; } .event-meta,.event-source { padding-top:0; } .event-state { margin-top:2px; } }
+    @media (max-width:920px) { .dashboard-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .event { grid-template-columns:78px 96px minmax(0,1fr); gap:10px; } .event-content { grid-template-columns:1fr; gap:8px; } .event-timeline { grid-template-columns:repeat(2,minmax(0,1fr)); } .event-details { gap:7px; } }
+    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .current + .current { border-top:1px solid var(--line); border-left:0; margin-top:15px; padding-top:15px; padding-left:0; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:6px; padding:14px 0; } .event-meta,.event-source { padding-top:0; } .event-source { grid-template-columns:max-content minmax(0,1fr); align-items:baseline; gap:7px; } .event-state { margin-top:2px; } .event-timeline { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; } }
   </style>
 </head>
 <body>
@@ -89,13 +118,13 @@
       <div class="actions"><button id="refresh" type="button">立即刷新</button><a class="link-button" href="https://livenote.yolotech.top/?mode=control" target="_blank" rel="noreferrer">打开云端管理台</a></div>
     </header>
     <section class="dashboard-grid" aria-label="服务状态">
-      <article class="panel service" id="worker-card"><div class="service-head"><span class="dot"></span><h2>本地 Worker</h2></div><p class="service-state">读取中…</p><p class="service-message"></p><div class="service-actions"><button id="restart-worker" type="button">重启 Worker</button><span id="restart-worker-status" class="service-action-status" role="status" aria-live="polite"></span></div></article>
+      <article class="panel service" id="worker-card"><div class="service-head"><span class="dot"></span><h2>本地 Worker</h2><div class="service-head-actions"><button id="restart-worker" type="button">重启</button><span id="restart-worker-status" class="service-head-action-status" role="status" aria-live="polite"></span></div></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
       <article class="panel service" id="codex-card"><div class="service-head"><span class="dot"></span><h2>本地总结</h2></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
       <article class="panel service" id="localServer-card"><div class="service-head"><span class="dot"></span><h2>本地 Server</h2></div><p class="service-state">读取中…</p><p class="service-message"></p><div class="service-actions"><button id="start-local-server" type="button">启动本地 Server</button><span id="start-local-server-status" class="service-action-status" role="status" aria-live="polite"></span></div></article>
       <article class="panel service" id="server-card"><div class="service-head"><span class="dot"></span><h2>ECS 连接</h2></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
     </section>
-    <section class="panel section" id="current-progress" hidden><div class="section-head"><h2>当前进度</h2><span class="section-note" id="updated">正在连接…</span></div><div class="current-grid"><article class="current" id="worker-current" hidden><h3>本地 Worker</h3><p class="empty">暂无正在处理的录音</p></article><article class="current" id="codex-current" hidden><h3>本地总结</h3><p class="empty">暂无正在生成的总结</p></article></div></section>
-    <section class="panel section"><div class="section-head"><h2>最近动态</h2></div><div class="event-list" id="events"><p class="empty">暂时没有动态。</p></div><details class="log-box"><summary>查看后台日志</summary><pre id="logs">选择日志后加载。</pre><select id="log-name" aria-label="选择日志"><option value="storage-worker.stdout.log">Worker 正常日志</option><option value="storage-worker.stderr.log">Worker 错误日志</option><option value="codex-bridge.stdout.log">总结正常日志</option><option value="codex-bridge.stderr.log">总结错误日志</option></select></details></section>
+    <section class="panel section" id="current-progress" hidden><div class="section-head"><h2>当前进度</h2><span class="section-note" id="progress-updated">正在连接…</span></div><div class="current-grid"><article class="current" id="worker-current" hidden><h3>本地 Worker</h3><p class="empty">暂无正在处理的录音</p></article><article class="current" id="codex-current" hidden><h3>本地总结</h3><p class="empty">暂无正在生成的总结</p></article></div></section>
+    <section class="panel section"><div class="section-head"><div><h2>最近动态</h2><span class="section-note" id="event-summary">当前显示 0 个任务</span></div><span class="section-note" id="updated">正在连接…</span></div><div class="event-list" id="events"><p class="empty">暂时没有动态。</p></div><details class="log-box"><summary>查看后台日志</summary><pre id="logs">选择日志后加载。</pre><select id="log-name" aria-label="选择日志"><option value="storage-worker.stdout.log">Worker 正常日志</option><option value="storage-worker.stderr.log">Worker 错误日志</option><option value="codex-bridge.stdout.log">总结正常日志</option><option value="codex-bridge.stderr.log">总结错误日志</option></select></details></section>
     <p class="footer-note">这个页面只在本机打开，关闭页面不会停止处理。任务完成后，请到云端管理台审核并发布。</p>
   </main>
   <script>
@@ -103,20 +132,31 @@
     const serviceLabels = { worker:'本地 Worker', codex:'本地总结', localServer:'本地 Server', server:'ECS 连接' }
     const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]))
     const timeLabel = (value) => value ? new Date(value).toLocaleTimeString('zh-CN') : '—'
-    const dateTimeLabel = (value) => value ? new Date(value).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '日期未知'
+    const dateTimeLabel = (value) => { if (!value) return '日期未知'; const date = new Date(value); return Number.isNaN(date.getTime()) ? '日期未知' : date.toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) }
     const durationLabel = (value) => { const totalSeconds = Math.max(0, Math.round(Number(value || 0) / 1000)); if (!totalSeconds) return '时长未知'; const hours = Math.floor(totalSeconds / 3600); const minutes = Math.floor((totalSeconds % 3600) / 60); const seconds = totalSeconds % 60; return hours ? `${hours}小时${String(minutes).padStart(2, '0')}分` : `${minutes}分${String(seconds).padStart(2, '0')}秒` }
+    const optionalDateTime = (value) => value ? dateTimeLabel(value) : '未记录'
+    const epoch = (value) => { if (value == null || value === '') return 0; const numeric = Number(value); if (Number.isFinite(numeric) && numeric > 0) return numeric; const parsed = Date.parse(value); return Number.isFinite(parsed) ? parsed : 0 }
+    const elapsedLabel = (start, end) => { const started = epoch(start); const finished = epoch(end); return started && finished && finished >= started ? durationLabel(finished - started) : '未记录' }
+    const durationValueLabel = (value) => { if (value == null || value === '') return '未记录'; const numeric = Number(value); return Number.isFinite(numeric) ? durationLabel(numeric) : String(value) }
+    const summaryDocument = (value) => { if (!value || typeof value !== 'object') return {}; if (value.result && typeof value.result === 'object') return value.result; if (value.summary && typeof value.summary === 'object') return value.summary; return value }
+    const summaryTextList = (value) => Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean) : []
+    const summaryListMarkup = (label, items) => { const values = summaryTextList(items); return values.length ? `<section class="event-structured-section"><h4>${esc(label)}</h4><ul class="event-structured-list">${values.map((item) => `<li>${esc(item)}</li>`).join('')}</ul></section>` : '' }
+    const summaryKnowledgeMarkup = (items) => { if (!Array.isArray(items) || !items.length) return ''; const sections = items.map((item) => { const title = item && typeof item === 'object' ? String(item.title || '知识要点') : '知识要点'; const points = item && typeof item === 'object' ? summaryTextList(item.points) : []; return points.length ? `<div class="event-structured-knowledge"><strong>${esc(title)}</strong><ul class="event-structured-list">${points.map((point) => `<li>${esc(point)}</li>`).join('')}</ul></div>` : '' }).filter(Boolean); return sections.length ? `<section class="event-structured-section"><h4>知识结构</h4><div class="event-structured-knowledge">${sections.join('')}</div></section>` : '' }
+    const summaryQuestionsMarkup = (items) => { if (!Array.isArray(items) || !items.length) return ''; const questions = items.map((item) => { if (!item || typeof item !== 'object') return ''; const question = String(item.question || '').trim(); const answer = String(item.answer || '').trim(); return question || answer ? `<div class="event-structured-qa"><strong>${esc(question || '重要问答')}</strong><span>${esc(answer || '暂未给出回答')}</span></div>` : '' }).filter(Boolean); return questions.length ? `<section class="event-structured-section"><h4>重要问答</h4>${questions.join('')}</section>` : '' }
     const phaseLabel = (value) => phaseLabels[value] || value || '未知'
     const statusClass = (item) => item.online ? (['failed','orphaned'].includes(item.phase) ? 'error' : (['transcribing','summarizing','downloading','reconstructing','uploading','claiming'].includes(item.phase) ? 'busy' : 'online')) : (['failed','orphaned'].includes(item.phase) ? 'error' : '')
-    function sourceSummary(item) { return Array.isArray(item.sources) ? item.sources.map((source) => `${source.label}：${source.online ? '运行中' : '未连接'}`).join(' · ') : '' }
-    function renderService(id, item) { const card = document.getElementById(id + '-card'); const dot = card.querySelector('.dot'); dot.className = 'dot ' + statusClass(item); const isServer = ['localServer','server'].includes(id); card.querySelector('.service-state').textContent = isServer ? (item.online ? '运行正常' : '未运行') : (item.online ? phaseLabel(item.phase) : (item.phase === 'failed' ? '处理失败' : '未运行')); card.querySelector('.service-message').textContent = [item.message || '', sourceSummary(item)].filter(Boolean).join(' · ') || '—' }
-    function renderService(id, item) { const card = document.getElementById(id + '-card'); const dot = card.querySelector('.dot'); dot.className = 'dot ' + statusClass(item); const isServer = ['localServer','server'].includes(id); card.querySelector('.service-state').textContent = isServer ? (item.online ? '运行正常' : '未运行') : (item.online ? phaseLabel(item.phase) : (item.phase === 'failed' ? '处理失败' : '未运行')); card.querySelector('.service-message').textContent = [item.message || '', sourceSummary(item)].filter(Boolean).join(' · ') || '—'; if (id === 'localServer') { const button = document.getElementById('start-local-server'); button.disabled = Boolean(item.online); button.textContent = item.online ? '本地 Server 已运行' : '启动本地 Server' } }
+    function sourceSummary(item) { return Array.isArray(item.sources) ? item.sources.map((source) => { const label = source.label && source.label !== '未命名来源' ? source.label : serviceLabels[source.service] || serviceLabels[item.service] || source.sourceId || '本地服务'; return `${label}：${source.online ? '运行中' : '未连接'}` }).join(' · ') : '' }
+    const countdownLabel = (nextPollAt) => { const remaining = Math.max(0, Math.ceil((Number(nextPollAt) - Date.now()) / 1000)); if (!remaining) return '即将拉取'; const minutes = Math.floor(remaining / 60); const seconds = remaining % 60; return minutes ? `${minutes}分${String(seconds).padStart(2, '0')}秒后` : `${seconds}秒后` }
+    const serviceMessage = (item) => { const messages = item.phase === 'waiting' ? [] : [item.message || '']; if (item.phase === 'waiting' && item.nextPollAt) messages.push(`下次拉取任务：${countdownLabel(item.nextPollAt)}`); if (Array.isArray(item.sources) && item.sources.length) messages.push(sourceSummary(item)); return messages.filter(Boolean).join(' · ') || '—' }
+    function renderService(id, item) { const card = document.getElementById(id + '-card'); const dot = card.querySelector('.dot'); dot.className = 'dot ' + statusClass(item); const isServer = ['localServer','server'].includes(id); card.querySelector('.service-state').textContent = isServer ? (item.online ? '运行正常' : '未运行') : (item.online ? phaseLabel(item.phase) : (item.phase === 'failed' ? '处理失败' : '未运行')); card.querySelector('.service-message').textContent = serviceMessage(item); if (id === 'localServer') { const button = document.getElementById('start-local-server'); button.disabled = Boolean(item.online); button.textContent = item.online ? '本地 Server 已运行' : '启动本地 Server' } }
     function renderCurrent(id, item) { const root = document.getElementById(id + '-current'); const task = item.task; const source = item.sourceLabel ? ` · ${item.sourceLabel}` : ''; if (!task) { root.hidden = true; root.innerHTML = ''; return false } root.hidden = false; const hasProgress = item.progress && (item.progress.total || item.progress.indeterminate); const total = Number(item.progress && item.progress.total || 0); const current = Number(item.progress && item.progress.current || 0); const progress = hasProgress && total > 0 && !item.progress.indeterminate ? Math.min(100, Math.round(current / total * 100)) : null; const progressClass = item.progress && item.progress.indeterminate ? ' indeterminate' : ''; const progressLeft = progress === null ? '正在准备…' : `${esc(current)} / ${esc(total)} ${esc(item.progress.unit || '')}`; const progressRight = [item.progress && item.progress.device ? `设备：${item.progress.device}` : '', item.progress && item.progress.elapsedSeconds != null ? `已运行 ${Number(item.progress.elapsedSeconds).toFixed(0)} 秒` : '', progress === null ? '' : `${progress}%`].filter(Boolean).join(' · '); root.innerHTML = `<h3>${serviceLabels[id]}${source} · ${esc(phaseLabel(item.phase))}</h3><p class="task-title" title="${esc(task.title)}">${esc(task.title)}</p><p class="task-message">${esc(item.message || '')}</p>${hasProgress ? `<div class="progress${progressClass}" role="progressbar" aria-valuenow="${progress === null ? 0 : progress}" aria-valuemin="0" aria-valuemax="100"><span style="width:${progress === null ? 35 : progress}%"></span></div><div class="progress-meta"><span>${progressLeft}</span><span>${esc(progressRight)}</span></div>` : ''}`; return true }
     const taskStatusLabels = { READY:'排队中', CLAIMED:'已领取', LOCAL_READY:'已就绪', PROCESSING:'处理中', TRANSCRIBING:'正在识别', TRANSCRIBED:'已识别，待总结', SUMMARIZING:'正在生成总结', REVIEW:'待发布', READY_TO_UPLOAD:'待回传', COMPLETED:'已完成', FAILED:'失败' }
     const taskStatusLabel = (value, fallback) => taskStatusLabels[value] || value || fallback || '未知'
     function renderEvents(events) {
       const root = document.getElementById('events')
       const rawTaskEvents = (events || []).filter((event) => event && (event.taskId || event.task?.id || event.task?.taskId))
-      if (!rawTaskEvents.length) { root.innerHTML = '<p class="empty">暂时没有已处理的任务。</p>'; return }
+      const count = document.getElementById('event-summary')
+      if (!rawTaskEvents.length) { if (count) count.textContent = '当前显示 0 个任务'; root.innerHTML = '<p class="empty">暂时没有已处理的任务。</p>'; return }
       const taskEvents = rawTaskEvents.some((event) => Array.isArray(event.history)) ? rawTaskEvents : Array.from(rawTaskEvents.slice().reverse().reduce((groups, event) => {
         const task = event.task && typeof event.task === 'object' ? event.task : {}
         const taskId = event.taskId || task.id || task.taskId
@@ -126,35 +166,55 @@
         if (!previous || previous.service !== historyItem.service || previous.phase !== historyItem.phase) current.history.push(historyItem)
         else current.history[current.history.length - 1] = historyItem
         current.task = { ...(current.task || {}), ...task }
-        Object.assign(current, event, { task: current.task, taskId, history: current.history })
+        Object.assign(current, event, { task: current.task, taskId, history: current.history, summary: event.summary || current.summary })
         groups.set(taskId, current)
         return groups
       }, new Map()).values()).sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))
+      if (count) count.textContent = `当前显示 ${taskEvents.length} 个任务`
       root.innerHTML = taskEvents.map((event) => {
         const task = event.task && typeof event.task === 'object' ? event.task : {}
         const taskId = event.taskId || task.id || task.taskId
         const title = event.title || task.title || task.sessionTitle || taskId || '未知任务'
         const owner = event.ownerName || task.ownerName || event.ownerId || task.ownerId || '未标注用户'
-        const taskStatus = event.taskStatus || event.status || task.status || (event.phase === 'completed' ? 'COMPLETED' : event.phase === 'failed' ? 'FAILED' : '')
+        const taskStatus = event.phase === 'completed' ? 'COMPLETED' : event.phase === 'failed' ? 'FAILED' : event.phase === 'orphaned' ? 'FAILED' : event.taskStatus || event.status || task.status || ''
         const duration = event.durationMs ?? task.durationMs
         const started = event.startedAt ?? task.startedAt
         const terminal = ['COMPLETED', 'REVIEW', 'FAILED'].includes(taskStatus) || ['completed', 'failed', 'orphaned'].includes(event.phase)
+        const history = Array.isArray(event.history) ? event.history : []
+        const historyTime = (phases) => { const item = history.find((entry) => phases.includes(entry.phase)); return item?.updatedAt || '' }
+        const taskCreatedAt = task.createdAt ?? event.createdAt
+        const uploadedAt = event.uploadedAt ?? task.uploadedAt ?? taskCreatedAt
+        const claimedAt = event.claimedAt ?? task.claimedAt ?? historyTime(['claiming'])
+        const downloadedAt = event.downloadedAt ?? task.downloadedAt ?? historyTime(['ready'])
+        const workerTerminalEvent = history.find((entry) => (entry.service || 'worker') === 'worker' && ['completed', 'failed', 'orphaned'].includes(entry.phase))
+        const processingEnd = workerTerminalEvent?.updatedAt || (terminal ? (event.updatedAt || task.updatedAt) : Date.now())
+        const workerDuration = event.workerDurationMs ?? task.workerDurationMs ?? elapsedLabel(claimedAt, processingEnd)
         const result = event.result || (event.error ? `失败：${event.error}` : terminal ? (taskStatus === 'FAILED' || event.phase === 'failed' ? '处理失败' : '已生成结果') : '尚未产生结果')
+        const error = event.error || task.errorMessage || (taskStatus === 'FAILED' ? result : '')
         const statusTone = taskStatus === 'FAILED' || event.phase === 'failed' || event.phase === 'orphaned' ? 'failed' : (['COMPLETED', 'REVIEW'].includes(taskStatus) || event.phase === 'completed' ? 'done' : 'active')
-        const recordedAt = dateTimeLabel(started || task.createdAt || event.createdAt || event.updatedAt)
+        const recordedAt = optionalDateTime(started)
         const titleWithDuration = duration ? `${title} · ${durationLabel(duration)}` : title
         const identity = `用户：${owner} · 任务：${title} · 录音：${recordedAt} · 时长：${durationLabel(duration)}`
-        const sourceLabel = [event.sourceLabel, serviceLabels[event.service] || event.service || '后台任务'].filter(Boolean).join(' · ')
-        return `<div class="event"><span class="event-meta">${esc(timeLabel(event.updatedAt))}</span><span class="event-source">${esc(sourceLabel)}</span><div class="event-content"><div><div class="event-title-row"><span class="event-owner">用户：${esc(owner)}</span><span class="event-title" title="${esc(identity)}">${esc(titleWithDuration)}</span></div><div class="event-facts">录音：${esc(recordedAt)} · 任务：${esc(taskId)}</div></div><div class="event-state"><span class="event-status ${statusTone}">状态：${esc(taskStatusLabel(taskStatus, phaseLabel(event.phase)))}</span></div><div class="event-details"><div class="event-detail"><span class="event-detail-label">结果</span><span class="event-detail-value" title="${esc(result)}">${esc(result)}</span></div></div></div></div>`
+        const sourceLabel = [...new Set([event.sourceLabel, task.sourceLabel, serviceLabels[event.service] || event.service || '后台任务'].filter(Boolean))].join(' · ')
+        const processingPhase = terminal && event.phase === 'checking' ? (taskStatus === 'REVIEW' ? '总结已生成，待发布' : taskStatusLabel(taskStatus, '已完成')) : phaseLabel(event.phase)
+        const summarySource = event.summary || task.summary || (event.result && typeof event.result === 'object' ? event.result : task.result)
+        const summaryTitle = summaryDocument(summarySource).title || ''
+        const summary = summaryDocument(summarySource)
+        const hasStructuredResult = summary && typeof summary === 'object' && !Array.isArray(summary) && Object.keys(summary).length > 0
+        const summarySyncError = event.summarySyncError || ''
+        const summaryMarkup = `<details class="event-structured"><summary>${hasStructuredResult ? '查看结构化结果' : summarySyncError ? '结构化结果（等待 ECS 更新）' : '结构化结果（尚未同步）'}</summary>${hasStructuredResult ? `<div class="event-structured-body">${summaryTitle ? `<div class="event-structured-title">${esc(summaryTitle)}</div>` : ''}${summary.overview ? `<p class="event-structured-overview">${esc(String(summary.overview))}</p>` : ''}${summaryListMarkup('重点', summary.keyPoints)}${summaryKnowledgeMarkup(summary.knowledgeStructure)}${summaryQuestionsMarkup(summary.questions)}${summaryListMarkup('行动建议', summary.actionItems)}${summaryListMarkup('不确定性说明', summary.confidenceNotes)}<details class="event-structured-json"><summary>查看原始 JSON</summary><pre>${esc(JSON.stringify(summary, null, 2))}</pre></details></div>` : `<p class="event-structured-empty">${esc(summarySyncError || '结构化总结尚未同步到这台电脑。')}</p>`}</details>`
+        return `<div class="event"><div class="event-meta"><span class="event-meta-label">最新更新时间</span><time>${esc(dateTimeLabel(event.updatedAt))}</time></div><div class="event-source"><span class="event-source-label">任务来源</span><strong>${esc(sourceLabel)}</strong></div><div class="event-content"><div><div class="event-title-row"><span class="event-owner">用户：${esc(owner)}</span><span class="event-title" title="${esc(identity)}">${esc(titleWithDuration)}</span></div><div class="event-facts">任务：${esc(taskId)}</div></div><div class="event-state"><span class="event-status ${statusTone}">状态：${esc(taskStatusLabel(taskStatus, phaseLabel(event.phase)))}</span></div><div class="event-details"><div class="event-timeline"><div class="event-detail"><span class="event-detail-label">任务创建时间</span><span class="event-detail-value">${esc(optionalDateTime(taskCreatedAt))}</span></div><div class="event-detail"><span class="event-detail-label">上传服务器时间</span><span class="event-detail-value">${esc(optionalDateTime(uploadedAt))}</span></div><div class="event-detail"><span class="event-detail-label">录音原始时间</span><span class="event-detail-value">${esc(optionalDateTime(started))}</span></div><div class="event-detail"><span class="event-detail-label">Worker 拉取时间</span><span class="event-detail-value">${esc(optionalDateTime(claimedAt))}</span></div><div class="event-detail"><span class="event-detail-label">下载完成时间</span><span class="event-detail-value">${esc(optionalDateTime(downloadedAt))}</span></div><div class="event-detail"><span class="event-detail-label">录音时长</span><span class="event-detail-value">${esc(durationValueLabel(duration))}</span></div><div class="event-detail"><span class="event-detail-label">Worker 处理时长</span><span class="event-detail-value">${esc(durationValueLabel(workerDuration))}</span></div><div class="event-detail"><span class="event-detail-label">处理阶段</span><span class="event-detail-value">${esc(processingPhase)}</span></div></div><div class="event-detail event-result"><span class="event-detail-label">结果</span><span class="event-detail-value" title="${esc(result)}">${esc(result)}</span></div>${error ? `<div class="event-detail event-error"><span class="event-detail-label">错误原因</span><span class="event-detail-value" title="${esc(error)}">${esc(error)}</span></div>` : ''}${summaryMarkup}</div></div></div>`
       }).join('')
     }
     async function loadLogs() { const name = document.getElementById('log-name').value; const response = await fetch('/api/logs?name=' + encodeURIComponent(name) + '&t=' + Date.now()); const data = await response.json(); document.getElementById('logs').textContent = data.lines.join('\n') || '暂无日志。' }
-    async function refresh() { try { const response = await fetch('/api/status?t=' + Date.now()); const data = await response.json(); renderService('worker', data.worker); renderService('codex', data.codex); renderService('localServer', data.localServer); renderService('server', data.server); const hasWorkerTask = renderCurrent('worker', data.worker); const hasCodexTask = renderCurrent('codex', data.codex); document.getElementById('current-progress').hidden = !(hasWorkerTask || hasCodexTask); document.getElementById('updated').textContent = '更新于 ' + timeLabel(data.updatedAt); renderEvents(data.events || []) } catch (error) { document.getElementById('updated').textContent = '页面服务连接失败'; console.error(error) } }
+    let latestStatus = null
+    function refreshCountdown() { if (latestStatus?.worker) renderService('worker', latestStatus.worker) }
+    async function refresh() { try { const response = await fetch('/api/status?t=' + Date.now()); const data = await response.json(); latestStatus = data; renderService('worker', data.worker); renderService('codex', data.codex); renderService('localServer', data.localServer); renderService('server', data.server); const hasWorkerTask = renderCurrent('worker', data.worker); const hasCodexTask = renderCurrent('codex', data.codex); document.getElementById('current-progress').hidden = !(hasWorkerTask || hasCodexTask); const updatedLabel = '更新于 ' + timeLabel(data.updatedAt); document.getElementById('updated').textContent = updatedLabel; document.getElementById('progress-updated').textContent = updatedLabel; renderEvents(data.events || []) } catch (error) { document.getElementById('updated').textContent = '页面服务连接失败'; const progressUpdated = document.getElementById('progress-updated'); if (progressUpdated) progressUpdated.textContent = '页面服务连接失败'; console.error(error) } }
     async function restartWorker() { const button = document.getElementById('restart-worker'); const status = document.getElementById('restart-worker-status'); button.disabled = true; status.textContent = '正在重启…'; try { const response = await fetch('/api/worker/restart', { method:'POST' }); const data = await response.json(); status.textContent = data.message || (response.ok ? '重启已开始。' : '重启失败。'); if (response.ok) { setTimeout(refresh, 1000); setTimeout(() => { status.textContent = ''; button.disabled = false }, 5000) } else { button.disabled = false } } catch (error) { status.textContent = '页面服务连接失败。'; button.disabled = false } }
     async function startLocalServer() { const button = document.getElementById('start-local-server'); const status = document.getElementById('start-local-server-status'); const dot = document.querySelector('#localServer-card .dot'); button.disabled = true; status.textContent = ''; dot.className = 'dot busy'; try { const response = await fetch('/api/local-server/start', { method:'POST' }); const data = await response.json(); if (!response.ok) { status.textContent = data.message || '启动失败。'; dot.className = 'dot error'; button.disabled = false } else { setTimeout(refresh, 1000) } } catch (error) { status.textContent = '页面服务连接失败。'; dot.className = 'dot error'; button.disabled = false } }
     document.getElementById('restart-worker').addEventListener('click', restartWorker)
     document.getElementById('start-local-server').addEventListener('click', startLocalServer)
-    document.getElementById('refresh').addEventListener('click', refresh); document.getElementById('log-name').addEventListener('change', loadLogs); refresh(); setInterval(refresh, 10000)
+    document.getElementById('refresh').addEventListener('click', refresh); document.getElementById('log-name').addEventListener('change', loadLogs); refresh(); setInterval(refreshCountdown, 1000); setInterval(refresh, 10000)
   </script>
 </body>
 </html>

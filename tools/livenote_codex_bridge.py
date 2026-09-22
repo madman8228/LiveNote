@@ -41,7 +41,7 @@ POLL_SECONDS = max(60, int(os.environ.get('LIVENOTE_CODEX_POLL_SECONDS', '300'))
 HEARTBEAT_SECONDS = max(5, int(os.environ.get('LIVENOTE_CODEX_HEARTBEAT_SECONDS', '10')))
 
 
-def report_codex(phase: str, message: str, task: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
+def report_codex(phase: str, message: str, task: dict[str, Any] | None = None, error: str = '', summary: dict[str, Any] | None = None, record_event: bool = True) -> None:
     task_snapshot = None
     if task:
         task_snapshot = {
@@ -53,9 +53,14 @@ def report_codex(phase: str, message: str, task: dict[str, Any] | None = None, e
             'createdAt': task.get('createdAt'),
             'startedAt': task.get('startedAt'),
             'durationMs': task.get('durationMs'),
+            'claimedAt': task.get('claimedAt'),
+            'downloadedAt': task.get('downloadedAt'),
+            'updatedAt': task.get('updatedAt'),
+            'errorMessage': task.get('errorMessage'),
+            'errorStage': task.get('errorStage'),
             'status': task.get('status'),
         }
-    update_status('codex', phase, message, task=task_snapshot, error=error, record_event=record_event)
+    update_status('codex', phase, message, task=task_snapshot, error=error, summary=summary, record_event=record_event)
 
 
 def request_json(server: str, path: str, method: str = 'GET', payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -98,7 +103,7 @@ def build_prompt(summary_input: dict[str, Any]) -> str:
 - overview：用老人容易看懂的中文概括
 - keyPoints：关键知识点
 - knowledgeStructure：按主题分组的知识结构
-- questions：重要问答；无法确认的问题不要编造，startMs 可以省略
+- questions：重要问答；无法确认的问题不要编造，无法确认时间时 startMs 填 null
 - actionItems：行动建议
 - confidenceNotes：需要提醒读者的不确定性、个人经验和风险
 
@@ -141,7 +146,16 @@ def run_codex(prompt: str, model: str | None = None) -> dict[str, Any]:
         command.extend(['--model', model])
     command.append('-')
     try:
-        completed = subprocess.run(command, input=prompt, text=True, capture_output=True, timeout=1800, check=False)
+        completed = subprocess.run(
+            command,
+            input=prompt,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            capture_output=True,
+            timeout=1800,
+            check=False,
+        )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or '').strip()
             raise RuntimeError(f'本地 Codex 执行失败：{detail[-1500:]}')
@@ -166,6 +180,15 @@ def submit_summary(server: str, summary_input: dict[str, Any], result: dict[str,
     return request_json(server, f'/tasks/{urllib.parse.quote(task_id)}/summary-result', 'POST', payload)
 
 
+def report_summary_failure(server: str, task_id: str, error: str) -> dict[str, Any]:
+    return request_json(
+        server,
+        f'/tasks/{urllib.parse.quote(task_id)}/summary-failed',
+        'POST',
+        {'errorMessage': error[:4000]},
+    )
+
+
 def find_tasks(server: str, task_id: str | None = None) -> list[str]:
     if task_id:
         return [task_id]
@@ -178,7 +201,7 @@ def process_one(server: str, task_id: str, model: str | None = None) -> bool:
     report_codex('summarizing', '本地 Codex 正在生成总结。', summary_input)
     result = run_codex(build_prompt(summary_input), model)
     response = submit_summary(server, summary_input, result)
-    report_codex('completed', '总结已回传 ECS，等待管理员审核。', summary_input)
+    report_codex('completed', '总结已回传 ECS，等待管理员审核。', summary_input, summary=result)
     print(f'本地 Codex 总结完成：{task_id} -> {response.get("status")}', flush=True)
     return True
 
@@ -194,8 +217,13 @@ def run_once(args: argparse.Namespace) -> int:
         try:
             completed += int(process_one(args.server, task_id, args.model))
         except Exception as error:
-            report_codex('failed', '本地 Codex 总结失败。', {'taskId': task_id}, str(error))
-            print(f'总结失败 {task_id}: {error}', file=sys.stderr)
+            failure_detail = str(error)
+            try:
+                report_summary_failure(args.server, task_id, failure_detail)
+            except Exception as report_error:
+                failure_detail = f'{failure_detail}；总结失败状态回传失败：{report_error}'
+            report_codex('failed', '本地 Codex 总结失败。', {'taskId': task_id}, failure_detail)
+            print(f'总结失败 {task_id}: {failure_detail}', file=sys.stderr)
     return 0 if completed or not task_ids else 1
 
 

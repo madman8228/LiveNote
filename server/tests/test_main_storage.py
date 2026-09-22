@@ -740,6 +740,47 @@ class MainStorageTests(unittest.TestCase):
             api_key_only = client.get('/api/v1/tasks', headers={'X-API-Key': 'server-browser-api-key'})
             self.assertEqual(api_key_only.status_code, 401)
 
+    def test_worker_can_read_generated_summary_draft(self) -> None:
+        from fastapi.testclient import TestClient
+
+        session_id = 'worker-summary-draft-session'
+        now = main.now_ms()
+        main.create_session(main.SessionPayload(
+            id=session_id, title='summary draft', startedAt=now, endedAt=now + 1000,
+            status='COMPLETED', durationMs=1000, createdAt=now, updatedAt=now,
+        ))
+        with main.connect() as connection:
+            task_id = main.create_processing_task(connection, session_id, now)
+            result = {'title': '结构化总结', 'overview': '云端已生成的内容。'}
+            connection.execute(
+                "UPDATE processing_tasks SET status = 'REVIEW', result_version = 1 WHERE id = ?",
+                (task_id,),
+            )
+            connection.execute(
+                '''INSERT INTO result_revisions
+                   (id, task_id, session_id, version, content_hash, content_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                ('revision-worker-summary-draft', task_id, session_id, 1, 'hash-worker-summary-draft', json.dumps(result), now),
+            )
+
+        previous_worker = os.environ.get('LIVENOTE_WORKER_TOKEN')
+        os.environ['LIVENOTE_WORKER_TOKEN'] = 'worker-summary-token'
+        try:
+            client = TestClient(main.app)
+            response = client.get(
+                f'/api/v1/tasks/{task_id}/summary-result',
+                headers={'X-Worker-Token': 'worker-summary-token'},
+            )
+        finally:
+            if previous_worker is None:
+                os.environ.pop('LIVENOTE_WORKER_TOKEN', None)
+            else:
+                os.environ['LIVENOTE_WORKER_TOKEN'] = previous_worker
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['status'], 'REVIEW')
+        self.assertEqual(response.json()['items'][0]['result']['title'], '结构化总结')
+
     def test_task_payload_includes_server_source(self) -> None:
         session_id = 'task-source-session'
         now = main.now_ms()
@@ -1894,6 +1935,48 @@ class MainStorageTests(unittest.TestCase):
         self.assertEqual(status.json()['liveProcessing']['uploadedChunks'], 1)
         retry = client.post(f'/api/v1/sessions/{session_id}/live-processing/retry')
         self.assertEqual(retry.status_code, 200, retry.text)
+
+    def test_summary_failure_is_retryable_without_reprocessing_audio(self) -> None:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(main.app)
+        now = main.now_ms()
+        session_id = 'summary-failure-session'
+        task_id = 'summary-failure-task'
+        main.create_session(main.SessionPayload(
+            id=session_id, title='summary failure', startedAt=now - 1000,
+            endedAt=now, status='COMPLETED', durationMs=1000,
+            createdAt=now - 1000, updatedAt=now,
+        ))
+        with sqlite3.connect(main.DB_PATH) as connection:
+            connection.execute(
+                "INSERT INTO processing_tasks(id, session_id, status, created_at, updated_at) VALUES (?, ?, 'SUMMARIZING', ?, ?)",
+                (task_id, session_id, now - 500, now - 100),
+            )
+
+        failed = client.post(
+            f'/api/v1/tasks/{task_id}/summary-failed',
+            json={'errorMessage': 'Codex stdin 编码失败'},
+        )
+        self.assertEqual(failed.status_code, 200, failed.text)
+        self.assertEqual(failed.json()['task']['status'], 'FAILED')
+        self.assertEqual(failed.json()['task']['errorStage'], 'SUMMARY')
+        self.assertIn('编码失败', failed.json()['task']['errorMessage'])
+
+        previous_admin = os.environ.get('LIVENOTE_ADMIN_TOKEN')
+        os.environ['LIVENOTE_ADMIN_TOKEN'] = 'summary-failure-admin-token'
+        try:
+            retried = client.post(
+                f'/api/v1/admin/tasks/{task_id}/retry',
+                headers={'X-Admin-Token': 'summary-failure-admin-token'},
+            )
+        finally:
+            if previous_admin is None:
+                os.environ.pop('LIVENOTE_ADMIN_TOKEN', None)
+            else:
+                os.environ['LIVENOTE_ADMIN_TOKEN'] = previous_admin
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(retried.json()['status'], 'TRANSCRIBED')
 
 
 if __name__ == '__main__':

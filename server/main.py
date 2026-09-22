@@ -352,6 +352,10 @@ class SummaryResultPayload(BaseModel):
     result: KnowledgeDocument
 
 
+class SummaryFailurePayload(BaseModel):
+    errorMessage: str = Field(default='', max_length=4000)
+
+
 class LocalTranscriptPayload(BaseModel):
     """Transcript produced by the PC that owns Whisper/FFmpeg."""
 
@@ -1625,6 +1629,45 @@ def get_summary_input(task_id: str, request: Request) -> dict:
     }
 
 
+@app.get('/api/v1/tasks/{task_id}/summary-result')
+def get_summary_result(task_id: str, request: Request) -> dict:
+    """Read the latest generated draft for the local dashboard.
+
+    This is intentionally Worker-authenticated: the local Worker already has
+    permission to read the task transcript and submit this exact task's draft.
+    It does not publish or change the review state.
+    """
+    validate_identifier(task_id, 'Task ID')
+    authorize_worker(request)
+    with connect() as connection:
+        task = connection.execute(
+            'SELECT id, session_id, status FROM processing_tasks WHERE id = ?',
+            (task_id,),
+        ).fetchone()
+        if task is None:
+            raise HTTPException(status_code=404, detail='任务不存在')
+        rows = connection.execute(
+            'SELECT id, task_id, session_id, version, content_json, created_at FROM result_revisions WHERE task_id = ? ORDER BY version DESC',
+            (task_id,),
+        ).fetchall()
+    return {
+        'taskId': task['id'],
+        'sessionId': task['session_id'],
+        'status': task['status'],
+        'items': [
+            {
+                'id': row['id'],
+                'taskId': row['task_id'],
+                'sessionId': row['session_id'],
+                'version': row['version'],
+                'createdAt': row['created_at'],
+                'result': json.loads(row['content_json']),
+            }
+            for row in rows
+        ],
+    }
+
+
 @app.post('/api/v1/tasks/{task_id}/summary-result')
 def submit_summary_result(task_id: str, payload: SummaryResultPayload, request: Request) -> dict:
     """Accept a Codex-generated summary only for the exact transcript run read."""
@@ -1644,6 +1687,29 @@ def submit_summary_result(task_id: str, payload: SummaryResultPayload, request: 
         if run is None or run['status'] != 'COMPLETED' or int(run['generation']) != payload.generation or run['source_hash'] != payload.sourceHash:
             raise HTTPException(status_code=409, detail='总结所依据的逐字稿版本已变化，请重新读取。')
     return _store_admin_task_result(task_id, KnowledgeResultPayload(version=1, result=payload.result), 'SUBMIT_CODEX_SUMMARY')
+
+
+@app.post('/api/v1/tasks/{task_id}/summary-failed')
+def report_summary_failure(task_id: str, payload: SummaryFailurePayload, request: Request) -> dict:
+    """Make a failed local summary visible and retryable instead of leaving it stuck."""
+    validate_identifier(task_id, 'Task ID')
+    authorize_worker(request)
+    message = payload.errorMessage.strip() or '本地 Codex 总结失败。'
+    with connect() as connection:
+        task = connection.execute('SELECT status FROM processing_tasks WHERE id = ?', (task_id,)).fetchone()
+        if task is None:
+            raise HTTPException(status_code=404, detail='任务不存在')
+        if task['status'] not in {'TRANSCRIBED', 'SUMMARIZING'}:
+            raise HTTPException(status_code=409, detail=f'任务当前不能标记总结失败：{task["status"]}')
+        updated_at = now_ms()
+        connection.execute(
+            """UPDATE processing_tasks
+               SET status = 'FAILED', error_message = ?, error_stage = 'SUMMARY', updated_at = ?
+               WHERE id = ?""",
+            (message, updated_at, task_id),
+        )
+        row = _worker_task_row(connection, task_id)
+    return {'ok': True, 'task': task_payload(row)}
 
 
 @app.post('/api/v1/admin/tasks/{task_id}/result-local')
@@ -1698,19 +1764,35 @@ def admin_retry_task(task_id: str, request: Request) -> dict:
     require_admin(request)
     validate_identifier(task_id, 'Task ID')
     with connect() as connection:
-        result = connection.execute(
-            """UPDATE processing_tasks
-               SET status = 'READY', error_message = '', error_stage = '',
-                   claimed_by = NULL, claimed_at = NULL,
-                   requested_worker_id = NULL, lease_token_hash = NULL,
-                   lease_expires_at = NULL, downloaded_at = NULL, updated_at = ?
-               WHERE id = ? AND status = 'FAILED'""",
-            (now_ms(), task_id),
-        )
+        task = connection.execute('SELECT status, error_stage FROM processing_tasks WHERE id = ?', (task_id,)).fetchone()
+        if task is None or task['status'] != 'FAILED':
+            raise HTTPException(status_code=409, detail='只有失败任务可以重试')
+        updated_at = now_ms()
+        summary_retry = task['error_stage'] == 'SUMMARY'
+        if summary_retry:
+            result = connection.execute(
+                """UPDATE processing_tasks
+                   SET status = 'TRANSCRIBED', error_message = '', error_stage = '',
+                       claimed_by = NULL, claimed_at = NULL,
+                       requested_worker_id = NULL, lease_token_hash = NULL,
+                       lease_expires_at = NULL, updated_at = ?
+                   WHERE id = ? AND status = 'FAILED'""",
+                (updated_at, task_id),
+            )
+        else:
+            result = connection.execute(
+                """UPDATE processing_tasks
+                   SET status = 'READY', error_message = '', error_stage = '',
+                       claimed_by = NULL, claimed_at = NULL,
+                       requested_worker_id = NULL, lease_token_hash = NULL,
+                       lease_expires_at = NULL, downloaded_at = NULL, updated_at = ?
+                   WHERE id = ? AND status = 'FAILED'""",
+                (updated_at, task_id),
+            )
         if result.rowcount == 0:
             raise HTTPException(status_code=409, detail='只有失败任务可以重试')
-        _audit(connection, 'admin', 'RETRY_TASK', task_id, {})
-    return {'ok': True, 'taskId': task_id, 'status': 'READY'}
+        _audit(connection, 'admin', 'RETRY_TASK', task_id, {'stage': 'SUMMARY' if summary_retry else 'PROCESSING'})
+    return {'ok': True, 'taskId': task_id, 'status': 'TRANSCRIBED' if summary_retry else 'READY'}
 
 
 @app.post('/api/v1/admin/devices/{device_id}/revoke')

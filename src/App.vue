@@ -2096,7 +2096,11 @@ onBeforeUnmount(() => { pwaInstallManager.stop(); unsubscribePwaInstall(); windo
         <div v-if="errorMessage" class="error-message error-feedback" role="alert"><span class="error-feedback-copy">{{ errorMessage }}</span><button v-if="diagnosticFeedback.status !== 'success'" class="text-button compact-button error-feedback-button" type="button" :disabled="diagnosticFeedback.status === 'uploading'" @click="uploadAutomaticDiagnostic">{{ diagnosticFeedback.status === 'uploading' ? '反馈中…' : '自动反馈问题' }}</button><span v-if="diagnosticFeedback.message" class="error-feedback-status" :class="'diagnostic-' + diagnosticFeedback.status">{{ diagnosticFeedback.message }}</span></div>
       </section>
 
-      <div v-if="isRecording" class="marker-actions live-markers"><span class="field-label">快速标记</span><input v-model="markerNoteDraft" class="marker-note-input" maxlength="400" placeholder="备注（可选）" /><button type="button" @click="addMarker('KEY_POINT')">重点</button><button type="button" @click="addMarker('QUESTION')">疑问</button><small v-if="lastMarkerMessage">{{ lastMarkerMessage }}</small></div>
+      <div v-if="isRecording" class="marker-actions live-markers">
+        <div class="live-marker-note-row"><span class="field-label">快速标记</span><input v-model="markerNoteDraft" class="marker-note-input" maxlength="400" placeholder="备注（可选）" /></div>
+        <div class="live-marker-button-row"><button type="button" @click="addMarker('KEY_POINT')">标记重点</button><button type="button" @click="addMarker('QUESTION')">标记疑问</button></div>
+        <small v-if="lastMarkerMessage">{{ lastMarkerMessage }}</small>
+      </div>
 
       <div v-if="sessionMarkers.length" class="inline-marker-list"><div class="inline-marker-list-heading"><strong>本场标记</strong><button class="text-button" type="button" @click="openSessions(currentSession?.id)">查看全部</button></div><div class="inline-marker-items"><span v-for="marker in sessionMarkers.slice(-3).reverse()" :key="marker.id" class="inline-marker-item"><strong>{{ markerTypeLabel(marker.type) }}</strong><span>{{ formatDuration(marker.elapsedMs) }}</span></span></div></div>
       <div v-if="hasLifecycleRisk" class="lifecycle-warning"><strong>录音期间页面曾离开前台</strong><span>{{ formatDate(lastHiddenEvent?.wallClockMs ?? null) }} · 风险区间 {{ formatDuration(lifecycleGapMs) }}</span></div>
