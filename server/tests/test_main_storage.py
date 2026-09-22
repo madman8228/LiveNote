@@ -327,6 +327,29 @@ class MainStorageTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_device_delete_blocks_session_with_local_ready_task(self) -> None:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(main.app)
+        now = main.now_ms()
+        session_id = 'device-delete-local-ready-session'
+        task_id = 'device-delete-local-ready-task'
+        self.assertEqual(client.post('/api/v1/sessions', json={
+            'id': session_id, 'title': '本地处理中不可删除', 'startedAt': now, 'endedAt': now,
+            'status': 'COMPLETED', 'durationMs': 0, 'createdAt': now, 'updatedAt': now,
+        }).status_code, 200)
+        with main.connect() as connection:
+            connection.execute(
+                'INSERT INTO processing_tasks(id, session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                (task_id, session_id, 'LOCAL_READY', now, now),
+            )
+
+        response = client.delete(f'/api/v1/sessions/{session_id}')
+        self.assertEqual(response.status_code, 409, response.text)
+        with main.connect() as connection:
+            self.assertIsNotNone(connection.execute('SELECT id FROM sessions WHERE id = ?', (session_id,)).fetchone())
+            self.assertIsNotNone(connection.execute('SELECT id FROM processing_tasks WHERE id = ?', (task_id,)).fetchone())
+
     def test_ended_recording_session_is_repaired_to_interrupted(self) -> None:
         now = main.now_ms()
         session_id = 'ended-recording-without-completion'
@@ -365,6 +388,40 @@ class MainStorageTests(unittest.TestCase):
             deleted = client.delete(f'/api/v1/admin/sessions/{session_id}', headers={'X-Admin-Token': 'admin-delete-token'})
             self.assertEqual(deleted.status_code, 200)
             self.assertEqual(client.get(f'/api/v1/admin/sessions/{session_id}', headers={'X-Admin-Token': 'admin-delete-token'}).status_code, 404)
+        finally:
+            if previous_admin is None:
+                os.environ.pop('LIVENOTE_ADMIN_TOKEN', None)
+            else:
+                os.environ['LIVENOTE_ADMIN_TOKEN'] = previous_admin
+
+    def test_admin_delete_blocks_session_with_local_ready_task(self) -> None:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(main.app)
+        now = main.now_ms()
+        session_id = 'admin-delete-local-ready-session'
+        task_id = 'admin-delete-local-ready-task'
+        self.assertEqual(client.post('/api/v1/sessions', json={
+            'id': session_id, 'title': '本地处理中不可删除', 'startedAt': now, 'endedAt': now,
+            'status': 'COMPLETED', 'durationMs': 0, 'createdAt': now, 'updatedAt': now,
+        }).status_code, 200)
+        with main.connect() as connection:
+            connection.execute(
+                'INSERT INTO processing_tasks(id, session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                (task_id, session_id, 'LOCAL_READY', now, now),
+            )
+
+        previous_admin = os.environ.get('LIVENOTE_ADMIN_TOKEN')
+        os.environ['LIVENOTE_ADMIN_TOKEN'] = 'admin-delete-local-ready-token'
+        try:
+            response = client.delete(
+                f'/api/v1/admin/sessions/{session_id}',
+                headers={'X-Admin-Token': 'admin-delete-local-ready-token'},
+            )
+            self.assertEqual(response.status_code, 409, response.text)
+            with main.connect() as connection:
+                self.assertIsNotNone(connection.execute('SELECT id FROM sessions WHERE id = ?', (session_id,)).fetchone())
+                self.assertIsNotNone(connection.execute('SELECT id FROM processing_tasks WHERE id = ?', (task_id,)).fetchone())
         finally:
             if previous_admin is None:
                 os.environ.pop('LIVENOTE_ADMIN_TOKEN', None)

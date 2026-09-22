@@ -27,6 +27,7 @@ WORKER_ID = os.environ.get('LIVENOTE_TRANSCRIBER_ID', 'local-transcriber')
 SERVER = os.environ.get('LIVENOTE_SERVER_URL', 'http://127.0.0.1:8000/api/v1').rstrip('/')
 WORKER_TOKEN = os.environ.get('LIVENOTE_WORKER_TOKEN', '')
 API_KEY = os.environ.get('LIVENOTE_API_KEY', '')
+PROCESSING_MODE = os.environ.get('LIVENOTE_PROCESSING_MODE', 'local').strip().lower()
 
 
 def _connect() -> sqlite3.Connection:
@@ -63,6 +64,24 @@ def prepare_summary(task_id: str) -> int:
         if task['status'] == 'TRANSCRIBED':
             connection.execute("UPDATE processing_tasks SET status='SUMMARIZING', updated_at=strftime('%s','now')*1000 WHERE id=?", (task_id,))
     print(json.dumps({'taskId': task_id, 'sessionId': task['session_id'], 'status': 'SUMMARIZING', 'run': dict(run) if run else None, 'transcript': transcript}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def prepare_remote_summary(server: str, task_id: str) -> int:
+    """Read the transcript from an ECS storage server for the current Codex chat."""
+    headers = {'Accept': 'application/json'}
+    if WORKER_TOKEN:
+        headers['X-Worker-Token'] = WORKER_TOKEN
+    if API_KEY:
+        headers['X-API-Key'] = API_KEY
+    request = urllib.request.Request(f'{server}/tasks/{task_id}/summary-input', headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            print(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as error:
+        raise ProcessingError(f'逐字稿读取失败 {error.code}: {error.read().decode("utf-8", errors="replace")}') from error
+    except urllib.error.URLError as error:
+        raise ProcessingError(f'无法连接总结服务器：{error.reason}') from error
     return 0
 
 
@@ -104,7 +123,8 @@ def build_parser() -> argparse.ArgumentParser:
     listing.set_defaults(handler=lambda _args: list_tasks())
     summary = sub.add_parser('summary-prepare', help='输出给当前 Codex 聊天读取的逐字稿')
     summary.add_argument('task_id')
-    summary.set_defaults(handler=lambda args: prepare_summary(args.task_id))
+    summary.add_argument('--server', default=SERVER)
+    summary.set_defaults(handler=lambda args: prepare_remote_summary(args.server, args.task_id) if PROCESSING_MODE == 'storage' else prepare_summary(args.task_id))
     submit = sub.add_parser('summary-submit', help='提交当前 Codex 根据逐字稿生成的总结草稿')
     submit.add_argument('task_id')
     submit.add_argument('result', type=Path, help='包含运行版本信息和 result 的 JSON 文件')

@@ -58,7 +58,7 @@ OpenAI API、自动聊天机器人、安装或调用 ASR/LLM 模型、云部署�
 
 - GET/POST /admin/users；PATCH /admin/users/{id} 编辑昵称和启停；POST /admin/users/{id}/pairing-codes；GET /admin/users/{id}/devices；POST /admin/devices/{id}/revoke。
 - GET /admin/sessions?ownerId=&query=&status=&offset=&limit=，含未分配筛选；GET /admin/sessions/{id} 含摘要/任务/结果版本；PATCH 更新标题或明确归属（归属变化记录操作，原用户后续请求无权访问）。
-- GET /admin/tasks 同样分页过滤；POST /admin/tasks/{id}/request-pull {workerId}；POST .../release、.../retry；GET /admin/workers 返回最近心跳与离线判断。
+- GET /admin/tasks 同样分页过滤；POST /admin/tasks/{id}/request-pull {workerId} 保留作兼容/诊断接口；POST .../release、.../retry；GET /admin/workers 返回最近心跳与离线判断。
 - GET /admin/tasks/{id}/results；POST .../publish {revisionId}。管理员查看草稿，手机只看发布指针。
 - GET /sessions 列当前认证用户服务端会话（用于同用户另一设备查看结果）；必须分页并避免与本地 Session 合并时覆盖录音状态。
 - 所有列表返回 {items,total,offset,limit}；保留旧 tasks 的 {tasks} 响应仅作为桥接器升级兼容，消费者同步更新。
@@ -66,7 +66,7 @@ OpenAI API、自动聊天机器人、安装或调用 ASR/LLM 模型、云部署�
 ### 任务协议
 
 - processing_tasks 增加 requested_worker_id、lease_token_hash、lease_expires_at、downloaded_at、error_stage；任务状态固定 READY → CLAIMED → LOCAL_READY → PROCESSING → REVIEW → COMPLETED，失败 FAILED。READY_TO_UPLOAD 旧值迁移 REVIEW；旧 COMPLETED 有合法文件时导入历史已发布版本，无有效文件标 FAILED 并保留原因。旧 CLAIMED/PROCESSING 标恢复待确认，不自动当作运行中。
-- 管理台 request-pull 仅指定 Worker；Worker 使用自己的鉴权轮询被指定的 READY，或管理员明确启用的自动拉取模式。默认仅处理页面请求。
+- Worker 使用自己的鉴权持续轮询 READY 队列并自动领取；管理台不再要求人工指定电脑。request-pull 仅保留作兼容/诊断能力，不属于正常操作流程。
 - claim 在 BEGIN IMMEDIATE 内条件更新，返回一次 leaseToken；30 分钟租约、60 秒 heartbeat，所有 Worker 状态写入含 leaseToken。workerId 不是授权凭证。领取失败不能修改任务。服务器 Worker 凭证加租约双重校验，过期旧 Worker 写入 409。
 - 状态转换端点保留 /tasks/{id}/status，但实现严格转换表：CLAIMED→LOCAL_READY，LOCAL_READY→PROCESSING，活动态→FAILED；禁止直接写 COMPLETED。结果上传产生 REVIEW，管理员发布才 COMPLETED。租约过期可回收未提交任务；REVIEW 不回收。人工 release 明确使旧租约失效。
 - bridge 命令：list、pull（支持指定 task 与恢复同 Worker 已领取任务）、watch、start-processing、submit-result；upload-result 作为 submit-result 别名，不再自动发布。watch 不自动开始加工。

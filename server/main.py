@@ -59,6 +59,7 @@ DATA_DIR = Path(os.environ.get('LIVENOTE_DATA_DIR', SERVER_DIR / 'data'))
 DB_PATH = Path(os.environ.get('LIVENOTE_DB_PATH', SERVER_DIR / 'livenote.sqlite3'))
 MAX_CHUNK_BYTES = int(os.environ.get('LIVENOTE_MAX_CHUNK_BYTES', str(25 * 1024 * 1024)))
 MAX_DIAGNOSTIC_BYTES = int(os.environ.get('LIVENOTE_MAX_DIAGNOSTIC_BYTES', str(10 * 1024 * 1024)))
+MAX_AUDIO_ARTIFACT_BYTES = int(os.environ.get('LIVENOTE_MAX_AUDIO_ARTIFACT_BYTES', str(512 * 1024 * 1024)))
 UPLOAD_DURATION_TOLERANCE_MS = int(os.environ.get('LIVENOTE_UPLOAD_DURATION_TOLERANCE_MS', '15000'))
 LEASE_DURATION_MS = int(os.environ.get('LIVENOTE_TASK_LEASE_MS', str(30 * 60 * 1000)))
 RUNTIME_ENV = os.environ.get('LIVENOTE_ENV', 'development').strip().lower()
@@ -68,8 +69,15 @@ IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 TASK_STATUSES = {'READY', 'CLAIMED', 'LOCAL_READY', 'TRANSCRIBING', 'TRANSCRIBED', 'SUMMARIZING', 'PROCESSING', 'REVIEW', 'READY_TO_UPLOAD', 'COMPLETED', 'FAILED'}
 ACTIVE_SESSION_STATUSES = ('RECORDING', 'PAUSED', 'FINALIZING')
 LOCAL_PULL_ENABLED = os.environ.get('LIVENOTE_LOCAL_PULL_ENABLED', '1' if RUNTIME_ENV not in {'production', 'prod'} else '0').strip().lower() in {'1', 'true', 'yes', 'on'}
+PROCESSING_MODE = os.environ.get('LIVENOTE_PROCESSING_MODE', 'local').strip().lower()
+if PROCESSING_MODE not in {'local', 'storage'}:
+    raise RuntimeError('LIVENOTE_PROCESSING_MODE 只能是 local 或 storage。')
+STORAGE_ONLY_MODE = PROCESSING_MODE == 'storage'
 REQUIRE_DEVICE_AUTH = os.environ.get('LIVENOTE_REQUIRE_DEVICE_AUTH', '1').strip().lower() in {'1', 'true', 'yes', 'on'}
-LIVE_PROCESSING_ENABLED = os.environ.get('LIVENOTE_LIVE_PROCESSING_ENABLED', '1').strip().lower() in {'1', 'true', 'yes', 'on'}
+LIVE_PROCESSING_ENABLED = (
+    not STORAGE_ONLY_MODE
+    and os.environ.get('LIVENOTE_LIVE_PROCESSING_ENABLED', '1').strip().lower() in {'1', 'true', 'yes', 'on'}
+)
 _worker_inbox_value = os.environ.get('LIVENOTE_WORKER_INBOX', str(SERVER_DIR.parent / 'worker-inbox'))
 LOCAL_WORKER_INBOX = Path(_worker_inbox_value)
 if not LOCAL_WORKER_INBOX.is_absolute():
@@ -341,6 +349,16 @@ class SummaryResultPayload(BaseModel):
     result: KnowledgeDocument
 
 
+class LocalTranscriptPayload(BaseModel):
+    """Transcript produced by the PC that owns Whisper/FFmpeg."""
+
+    sourceHash: str = Field(min_length=64, max_length=64, pattern=r'^[a-fA-F0-9]{64}$')
+    model: str = Field(min_length=1, max_length=64)
+    language: str = Field(default='zh', min_length=2, max_length=16)
+    transcript: dict[str, Any]
+    durationSeconds: float | None = Field(default=None, ge=0)
+
+
 class UserCreatePayload(BaseModel):
     displayName: str = Field(min_length=1, max_length=120)
 
@@ -504,6 +522,32 @@ async def save_diagnostic_upload(upload: UploadFile, destination: Path) -> int:
     return size
 
 
+async def save_bounded_upload(upload: UploadFile, destination: Path, limit: int) -> tuple[int, str]:
+    """Stream a worker artifact to disk without buffering it in the API process."""
+    digest = hashlib.sha256()
+    size = 0
+    temporary = destination.with_name(f'.{destination.name}.part')
+    try:
+        with temporary.open('wb') as output:
+            while True:
+                block = await upload.read(1024 * 1024)
+                if not block:
+                    break
+                size += len(block)
+                if size > limit:
+                    raise HTTPException(status_code=413, detail='上传文件超过大小限制')
+                digest.update(block)
+                output.write(block)
+        temporary.replace(destination)
+    except HTTPException:
+        temporary.unlink(missing_ok=True)
+        raise
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return size, digest.hexdigest()
+
+
 init_db()
 
 
@@ -541,10 +585,17 @@ def health() -> dict:
         'service': 'livenote-api',
         'storageSchema': 9,
         'capabilities': {
-            'ffmpeg': bool(shutil.which(RECONSTRUCTION_FFMPEG)),
-            'ffprobe': bool(shutil.which(RECONSTRUCTION_FFPROBE)),
+            'processingMode': PROCESSING_MODE,
+            'storageOnly': STORAGE_ONLY_MODE,
+            'ffmpeg': bool(shutil.which(RECONSTRUCTION_FFMPEG)) if not STORAGE_ONLY_MODE else False,
+            'ffprobe': bool(shutil.which(RECONSTRUCTION_FFPROBE)) if not STORAGE_ONLY_MODE else False,
+            'serverReconstruction': not STORAGE_ONLY_MODE,
+            'serverAsr': not STORAGE_ONLY_MODE,
             'manualProcessing': True,
-            'localTranscription': is_model_cached(os.environ.get('LIVENOTE_WHISPER_MODEL', DEFAULT_MODEL)),
+            'localTranscription': (
+                is_model_cached(os.environ.get('LIVENOTE_WHISPER_MODEL', DEFAULT_MODEL))
+                if not STORAGE_ONLY_MODE else False
+            ),
             'liveIncrementalProcessing': LIVE_PROCESSING_ENABLED,
         },
     }
@@ -974,7 +1025,10 @@ def admin_delete_session(session_id: str, request: Request) -> dict:
         if session is None:
             raise HTTPException(status_code=404, detail='Session 不存在')
         active_task = connection.execute(
-            "SELECT id, status FROM processing_tasks WHERE session_id = ? AND status IN ('CLAIMED', 'PROCESSING', 'READY_TO_UPLOAD')",
+            """SELECT id, status FROM processing_tasks
+               WHERE session_id = ?
+                 AND status IN ('CLAIMED', 'LOCAL_READY', 'TRANSCRIBING', 'PROCESSING',
+                                'TRANSCRIBED', 'SUMMARIZING', 'READY_TO_UPLOAD')""",
             (session_id,),
         ).fetchone()
         if active_task:
@@ -1340,7 +1394,7 @@ def admin_task_audio(task_id: str, request: Request) -> FileResponse:
             raise HTTPException(status_code=404, detail='任务不存在')
         session_id = task['session_id']
         try:
-            output_path = _reconstruct_completed_session(connection, session_id)
+            output_path = _session_audio_for_playback(connection, session_id)
         except ReconstructionError as error:
             raise HTTPException(status_code=409, detail=f'整场音频暂不可用：{error}') from error
     return FileResponse(output_path, media_type='audio/webm', filename=f'{session_id}.webm')
@@ -1381,6 +1435,20 @@ def admin_auto_process(task_id: str, request: Request, payload: RequestPullPaylo
     require_admin(request)
     validate_identifier(task_id, 'Task ID')
     worker_id = payload.workerId.strip()
+    if STORAGE_ONLY_MODE:
+        with connect() as connection:
+            row = connection.execute(
+                '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status,
+                          user.display_name AS owner_name
+                   FROM processing_tasks task
+                   JOIN sessions session ON session.id = task.session_id
+                   LEFT JOIN users user ON user.id = session.owner_id
+                   WHERE task.id = ?''',
+                (task_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail='任务不存在')
+        return {'task': task_payload(row), 'job': None, 'deferred': False, 'processingMode': 'storage'}
     deferred = False
     with connect() as connection:
         task = connection.execute(
@@ -1934,6 +2002,184 @@ def get_processing_task(task_id: str, request: Request) -> dict:
     return {'task': task_payload(row)}
 
 
+def _worker_task_row(connection: sqlite3.Connection, task_id: str) -> sqlite3.Row:
+    row = connection.execute(
+        '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status
+           FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
+           WHERE task.id = ?''',
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    return row
+
+
+@app.get('/api/v1/tasks/{task_id}/manifest')
+def get_worker_task_manifest(task_id: str, request: Request = None) -> dict:
+    """Return raw Chunk metadata for a remote PC worker.
+
+    This endpoint deliberately does not reconstruct media. The ECS storage
+    process can therefore run without FFmpeg, Whisper, or PyTorch.
+    """
+    validate_identifier(task_id, 'Task ID')
+    authorize_worker(request)
+    worker_id = request.headers.get('x-worker-id') if request else None
+    lease_token = request.headers.get('x-task-lease') if request else None
+    with connect() as connection:
+        task = _worker_task_row(connection, task_id)
+        verify_task_lease(task, worker_id, lease_token)
+        segments = connection.execute(
+            '''SELECT id, segment_index, started_at, ended_at, mime_type, duration_ms, start_elapsed_ms
+               FROM segments WHERE session_id = ? ORDER BY segment_index''',
+            (task['session_id'],),
+        ).fetchall()
+        manifest_segments: list[dict[str, Any]] = []
+        for segment in segments:
+            chunks = connection.execute(
+                '''SELECT chunk_index, size, sha256, mime_type, elapsed_ms
+                   FROM chunks WHERE segment_id = ? ORDER BY chunk_index''',
+                (segment['id'],),
+            ).fetchall()
+            manifest_segments.append({
+                'id': segment['id'],
+                'index': segment['segment_index'],
+                'startedAt': segment['started_at'],
+                'endedAt': segment['ended_at'],
+                'mimeType': segment['mime_type'],
+                'durationMs': segment['duration_ms'],
+                'startElapsedMs': segment['start_elapsed_ms'],
+                'chunks': [
+                    {
+                        'index': chunk['chunk_index'],
+                        'size': chunk['size'],
+                        'sha256': chunk['sha256'],
+                        'mimeType': chunk['mime_type'],
+                        'elapsedMs': chunk['elapsed_ms'],
+                        'downloadPath': f'/tasks/{task_id}/chunks/{segment["id"]}/{chunk["chunk_index"]}',
+                    }
+                    for chunk in chunks
+                ],
+            })
+    return {
+        'task': task_payload(task),
+        'sessionId': task['session_id'],
+        'processingMode': PROCESSING_MODE,
+        'segments': manifest_segments,
+    }
+
+
+@app.get('/api/v1/tasks/{task_id}/chunks/{segment_id}/{chunk_index}')
+def get_worker_chunk(task_id: str, segment_id: str, chunk_index: int, request: Request = None) -> FileResponse:
+    """Stream one original Chunk to a leased remote worker."""
+    validate_identifier(task_id, 'Task ID')
+    validate_identifier(segment_id, 'Segment ID')
+    if chunk_index < 0:
+        raise HTTPException(status_code=400, detail='Chunk index 无效')
+    authorize_worker(request)
+    worker_id = request.headers.get('x-worker-id') if request else None
+    lease_token = request.headers.get('x-task-lease') if request else None
+    with connect() as connection:
+        task = _worker_task_row(connection, task_id)
+        verify_task_lease(task, worker_id, lease_token)
+        row = connection.execute(
+            '''SELECT chunk.local_path, chunk.size, chunk.sha256, chunk.mime_type
+               FROM chunks chunk JOIN segments segment ON segment.id = chunk.segment_id
+               WHERE chunk.segment_id = ? AND segment.session_id = ? AND chunk.chunk_index = ?''',
+            (segment_id, task['session_id'], chunk_index),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail='Chunk 不存在')
+    path = (DATA_DIR / row['local_path']).resolve()
+    data_root = DATA_DIR.resolve()
+    if data_root not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail='Chunk 文件不存在')
+    return FileResponse(path, media_type=row['mime_type'] or 'application/octet-stream', filename=f'{segment_id}-{chunk_index}.bin', headers={'X-Chunk-Sha256': row['sha256'], 'X-Chunk-Size': str(row['size'])})
+
+
+@app.post('/api/v1/tasks/{task_id}/audio-artifact')
+async def upload_worker_audio_artifact(
+    task_id: str,
+    request: Request,
+    upload: UploadFile = File(...),
+    x_file_sha256: str | None = Header(default=None),
+) -> dict:
+    """Accept the locally reconstructed, playable audio artifact."""
+    validate_identifier(task_id, 'Task ID')
+    authorize_worker(request)
+    worker_id = request.headers.get('x-worker-id')
+    lease_token = request.headers.get('x-task-lease')
+    with connect() as connection:
+        task = _worker_task_row(connection, task_id)
+        verify_task_lease(task, worker_id, lease_token)
+        if task['status'] not in {'CLAIMED', 'LOCAL_READY', 'PROCESSING'}:
+            raise HTTPException(status_code=409, detail=f'当前不能上传音频：{task["status"]}')
+        session_id = task['session_id']
+    destination = DATA_DIR / 'reconstructed' / 'sessions' / session_id / 'session.webm'
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = destination.with_name(f'.{destination.name}.{uuid.uuid4().hex}.upload')
+    size, digest = await save_bounded_upload(upload, staging, MAX_AUDIO_ARTIFACT_BYTES)
+    if x_file_sha256 and not secrets.compare_digest(digest, x_file_sha256.strip().lower()):
+        staging.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail='音频文件 SHA-256 校验失败')
+    staging.replace(destination)
+    with connect() as connection:
+        connection.execute('UPDATE processing_tasks SET downloaded_at = COALESCE(downloaded_at, ?), updated_at = ? WHERE id = ?', (now_ms(), now_ms(), task_id))
+    return {'ok': True, 'taskId': task_id, 'sessionId': session_id, 'size': size, 'sha256': digest, 'path': str(destination.relative_to(DATA_DIR))}
+
+
+@app.post('/api/v1/tasks/{task_id}/transcript')
+def upload_worker_transcript(task_id: str, payload: LocalTranscriptPayload, request: Request = None) -> dict:
+    """Persist a transcript generated on the user's local PC.
+
+    The endpoint creates the same completed processing run used by the local
+    pipeline, so the existing Codex summary and publication flow remains
+    unchanged.
+    """
+    validate_identifier(task_id, 'Task ID')
+    authorize_worker(request)
+    worker_id = request.headers.get('x-worker-id') if request else None
+    lease_token = request.headers.get('x-task-lease') if request else None
+    timestamp = now_ms()
+    with connect() as connection:
+        task = _worker_task_row(connection, task_id)
+        existing = connection.execute(
+            '''SELECT id, generation, source_hash, model, language
+               FROM processing_runs WHERE task_id = ? AND source_hash = ? AND status = 'COMPLETED'
+               ORDER BY generation DESC LIMIT 1''',
+            (task_id, payload.sourceHash.lower()),
+        ).fetchone()
+        if existing is not None and task['status'] in {'TRANSCRIBED', 'SUMMARIZING', 'REVIEW', 'COMPLETED'}:
+            return {'ok': True, 'taskId': task_id, 'sessionId': task['session_id'], 'status': task['status'], 'runId': existing['id'], 'generation': existing['generation'], 'sourceHash': existing['source_hash'], 'reused': True}
+        verify_task_lease(task, worker_id, lease_token)
+        if task['status'] not in {'CLAIMED', 'LOCAL_READY', 'PROCESSING'}:
+            raise HTTPException(status_code=409, detail=f'当前不能上传逐字稿：{task["status"]}')
+        artifact_path = DATA_DIR / 'reconstructed' / 'sessions' / task['session_id'] / 'session.webm'
+        if STORAGE_ONLY_MODE and not artifact_path.is_file():
+            raise HTTPException(status_code=409, detail='请先回传本地重建后的可播放音频')
+        latest = connection.execute('SELECT COALESCE(MAX(generation), 0) AS generation FROM processing_runs WHERE task_id = ?', (task_id,)).fetchone()['generation']
+        run_id = f'run-{uuid.uuid4()}'
+        generation = int(latest) + 1
+        connection.execute(
+            '''INSERT INTO processing_runs(id, task_id, session_id, generation, source_hash, model, language, status, started_at, heartbeat_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?)''',
+            (run_id, task_id, task['session_id'], generation, payload.sourceHash.lower(), payload.model, payload.language, timestamp, timestamp, timestamp),
+        )
+        transcript = dict(payload.transcript)
+        transcript.update({'runId': run_id, 'generation': generation, 'sourceHash': payload.sourceHash.lower(), 'model': payload.model, 'language': payload.language})
+        transcript_path = DATA_DIR / 'processed' / 'sessions' / task['session_id'] / 'transcript.json'
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = transcript_path.with_suffix('.json.tmp')
+        temporary_path.write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary_path.replace(transcript_path)
+        connection.execute(
+            '''UPDATE processing_tasks SET status = 'TRANSCRIBED', claimed_by = NULL, claimed_at = NULL,
+               requested_worker_id = NULL, lease_token_hash = NULL, lease_expires_at = NULL,
+               error_message = '', error_stage = '', updated_at = ? WHERE id = ?''',
+            (timestamp, task_id),
+        )
+    return {'ok': True, 'taskId': task_id, 'sessionId': task['session_id'], 'status': 'TRANSCRIBED', 'runId': run_id, 'generation': generation, 'sourceHash': payload.sourceHash.lower(), 'reused': False}
+
+
 @app.post('/api/v1/tasks/{task_id}/claim')
 def claim_processing_task(task_id: str, payload: TaskClaimPayload, request: Request = None) -> dict:
     validate_identifier(task_id, 'Task ID')
@@ -2030,7 +2276,7 @@ def get_task_audio(task_id: str, request: Request = None, x_task_lease: str | No
         session_id = task['session_id']
     try:
         with connect() as connection:
-            output_path = _reconstruct_completed_session(connection, session_id)
+            output_path = _session_audio_for_playback(connection, session_id)
     except ReconstructionError as error:
         raise HTTPException(status_code=409, detail=f'整场音频重组失败：{error}') from error
     with connect() as connection:
@@ -2171,7 +2417,10 @@ def delete_session(session_id: str, request: Request = None) -> dict:
 
     with connect() as connection:
         active_task = connection.execute(
-            "SELECT id, status FROM processing_tasks WHERE session_id = ? AND status IN ('CLAIMED', 'PROCESSING', 'READY_TO_UPLOAD')",
+            """SELECT id, status FROM processing_tasks
+               WHERE session_id = ?
+                 AND status IN ('CLAIMED', 'LOCAL_READY', 'TRANSCRIBING', 'PROCESSING',
+                                'TRANSCRIBED', 'SUMMARIZING', 'READY_TO_UPLOAD')""",
             (session_id,),
         ).fetchone()
     if active_task:
@@ -2231,6 +2480,11 @@ def _require_completed_session(connection: sqlite3.Connection, session_id: str) 
 
 def _reconstruct_completed_session(connection: sqlite3.Connection, session_id: str) -> Path:
     """Restore Chunk bytes into Segment files before combining Segments."""
+    artifact = DATA_DIR / 'reconstructed' / 'sessions' / session_id / 'session.webm'
+    if artifact.is_file():
+        return artifact
+    if STORAGE_ONLY_MODE:
+        raise HTTPException(status_code=409, detail='电脑端尚未回传可播放音频，请等待本地处理完成')
     segments = _require_completed_session(connection, session_id)
     segment_paths: list[tuple[int, Path]] = []
     for segment in segments:
@@ -2239,10 +2493,17 @@ def _reconstruct_completed_session(connection: sqlite3.Connection, session_id: s
     return reconstruct_session(DATA_DIR, session_id, segment_paths)
 
 
+def _session_audio_for_playback(connection: sqlite3.Connection, session_id: str) -> Path:
+    """Return a durable PC-produced artifact, or reconstruct in local mode."""
+    return _reconstruct_completed_session(connection, session_id)
+
+
 @app.post('/api/v1/sessions/{session_id}/segments/{segment_id}/reconstruct')
 def reconstruct_segment_endpoint(session_id: str, segment_id: str, request: Request = None) -> dict:
     validate_identifier(session_id, 'Session ID')
     validate_identifier(segment_id, 'Segment ID')
+    if STORAGE_ONLY_MODE:
+        raise HTTPException(status_code=409, detail='当前为存储模式，Segment 音频由电脑端处理后回传整场音频')
     with connect() as connection:
         session_access(connection, session_id, request)
         segment_index, chunk_paths = _segment_chunk_paths(connection, session_id, segment_id)
@@ -2257,6 +2518,8 @@ def reconstruct_segment_endpoint(session_id: str, segment_id: str, request: Requ
 def get_segment_audio(session_id: str, segment_id: str, request: Request = None) -> FileResponse:
     validate_identifier(session_id, 'Session ID')
     validate_identifier(segment_id, 'Segment ID')
+    if STORAGE_ONLY_MODE:
+        raise HTTPException(status_code=409, detail='当前为存储模式，Segment 音频由电脑端处理后回传整场音频')
     with connect() as connection:
         session_access(connection, session_id, request)
         segment_index, chunk_paths = _segment_chunk_paths(connection, session_id, segment_id)
@@ -2273,6 +2536,9 @@ def reconstruct_session_endpoint(session_id: str, request: Request = None) -> di
     with connect() as connection:
         session_access(connection, session_id, request)
         segments = _require_completed_session(connection, session_id)
+        if STORAGE_ONLY_MODE:
+            output_path = _session_audio_for_playback(connection, session_id)
+            return {'ok': True, 'sessionId': session_id, 'segmentCount': len(segments), 'path': str(output_path.relative_to(DATA_DIR)), 'source': 'local-worker'}
         segment_paths: list[tuple[int, Path]] = []
         for segment in segments:
             _, chunk_paths = _segment_chunk_paths(connection, session_id, segment['id'])
@@ -2294,6 +2560,9 @@ def get_session_audio(session_id: str, request: Request = None) -> FileResponse:
     with connect() as connection:
         session_access(connection, session_id, request)
         segments = _require_completed_session(connection, session_id)
+        if STORAGE_ONLY_MODE:
+            output_path = _session_audio_for_playback(connection, session_id)
+            return FileResponse(output_path, media_type='audio/webm', filename=f'{session_id}.webm')
         segment_paths: list[tuple[int, Path]] = []
         for segment in segments:
             _, chunk_paths = _segment_chunk_paths(connection, session_id, segment['id'])

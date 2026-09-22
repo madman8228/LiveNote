@@ -8,6 +8,10 @@ python server/main.py
 本机正式流程由独立的 `tools/livenote_transcriber.py` 使用缓存的 Whisper 自动转写，服务器只保存检查点、逐字稿和任务状态；总结由当前 Codex 聊天读取 `/summary-input` 后生成并回传。不会调用 OpenAI API。
 `server/requirements.txt` 包含 Whisper/PyTorch；模型文件需要由部署提前准备，服务不会静默下载大型模型。
 
+如果 ECS 只负责存储和 API，请改用 `server/requirements-storage.txt`，并设置
+`LIVENOTE_PROCESSING_MODE=storage`。此模式不需要 FFmpeg、Whisper 或 PyTorch；这些程序和模型
+只安装在运行本地 Worker 的电脑上。
+
 默认监听 `0.0.0.0:8000`，SQLite 在 `server/livenote.sqlite3`，音频二进制文件在 `server/data/`。
 
 可选环境变量：
@@ -90,6 +94,7 @@ READY
 ```
 
 控制台地址为 `http://127.0.0.1:4173/?mode=control`。本机模式直接读取服务器已保存的音频并分段落盘；
+存储模式则由 `tools/livenote_worker.py process --watch` 下载原始 Chunk，在本机重建和转写后回传；
 云端 Worker 仍保留为异机兼容入口。
 云端模式下，家庭 PC 可以在控制台“设置”中填写 Worker 凭证并启动浏览器 Worker，
 选择任务目录后自动领取和保存音频，也可以继续使用命令行 Worker 做异机轮询。
@@ -103,6 +108,18 @@ Codex 读取逐字稿使用：
 ```powershell
 python tools/livenote_transcriber.py summary-prepare task-xxxx
 ```
+
+在 ECS 存储模式下，给该命令设置 `LIVENOTE_PROCESSING_MODE=storage`、
+`LIVENOTE_SERVER_URL`、`LIVENOTE_API_KEY` 和 `LIVENOTE_WORKER_TOKEN`，它会从 ECS
+读取逐字稿；不会读取本机 ECS 数据库副本。
+
+需要自动调用本地 Codex 时运行：
+
+```powershell
+python tools/livenote_codex_bridge.py watch
+```
+
+该进程只在本地调用 `codex exec`，并把当前任务的结构化总结回传 ECS；ECS 不运行 Codex。
 
 提交时使用包含 `runId`、`generation`、`sourceHash` 和 `result` 的总结文件：
 

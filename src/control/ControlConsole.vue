@@ -73,6 +73,7 @@ const editingNoteTaskId = ref<string | null>(null)
 const taskNoteDraft = ref('')
 const savingNoteTaskId = ref<string | null>(null)
 const localPullAvailable = ref(false)
+const storageOnly = ref(false)
 const bulkPulling = ref(false)
 const apiBase = String(import.meta.env.VITE_API_BASE_URL || '/api/v1')
 const adminAuthenticated = computed(() => Boolean(adminSession.value || adminToken.value))
@@ -274,12 +275,18 @@ function saveWorkerToken(): void { workerToken.value = workerToken.value.trim();
 async function refresh(): Promise<void> {
   loading.value = true; error.value = ''; message.value = ''
   try {
+    try {
+      const health = await ApiClient.health()
+      storageOnly.value = health.capabilities?.storageOnly === true || health.capabilities?.processingMode === 'storage'
+    } catch {
+      storageOnly.value = false
+    }
     if (!adminAuthenticated.value) {
       error.value = adminSetupAvailable.value ? '' : '请先登录管理员账号。'
       return
     }
     ApiClient.setAdminToken(adminToken.value)
-    try { localPullAvailable.value = (await ApiClient.adminLocalWorker()).enabled } catch { localPullAvailable.value = false }
+    try { localPullAvailable.value = !storageOnly.value && (await ApiClient.adminLocalWorker()).enabled } catch { localPullAvailable.value = false }
     if (view.value === 'tasks') {
       const result = await ApiClient.adminListTasks('ALL', 0, 200)
       tasks.value = result.items
@@ -398,17 +405,6 @@ async function pullAllReadyToLocal(): Promise<void> {
     bulkPulling.value = false
   }
 }
-async function requestPull(task: ProcessingTask): Promise<void> {
-  if (requestingTaskId.value) return
-  saveWorkerId(); ApiClient.setAdminToken(adminToken.value); error.value = ''; message.value = ''; requestingTaskId.value = task.id
-  try {
-    const result = await ApiClient.adminRequestPull(task.id, workerId.value)
-    tasks.value = tasks.value.map((item) => item.id === task.id ? mergeTaskUpdate(item, result.task) : item)
-    await refresh()
-    message.value = `已请求 Worker「${workerId.value}」领取「${task.title || '未命名会话'}」。任务会保持“待处理”，直到 Worker 实际下载。`
-  } catch (cause) { error.value = controlError(cause, '请求拉取失败。') }
-  finally { requestingTaskId.value = null }
-}
 async function retryTask(task: ProcessingTask): Promise<void> {
   if (requestingTaskId.value) return
   requestingTaskId.value = task.id; error.value = ''; message.value = ''
@@ -416,7 +412,7 @@ async function retryTask(task: ProcessingTask): Promise<void> {
     ApiClient.setAdminToken(adminToken.value)
     await ApiClient.adminRetryTask(task.id)
     await refresh()
-    message.value = '失败任务已重置，可以重新领取。'
+    message.value = '失败任务已重置，Worker 会自动领取。'
   } catch (cause) { error.value = controlError(cause, '重试任务失败。') }
   finally { requestingTaskId.value = null }
 }
@@ -471,6 +467,10 @@ async function pollBrowserWorker(): Promise<void> {
 }
 async function startBrowserWorker(): Promise<void> {
   if (browserWorkerRunning.value) return
+  if (storageOnly.value) {
+    browserWorkerError.value = '当前是 ECS 存储模式，请在本地运行 Worker 和 Codex Bridge。'
+    return
+  }
   saveWorkerId(); saveWorkerToken()
   if (!workerToken.value) {
     browserWorkerError.value = '请先填写 Worker 凭证。'
@@ -749,7 +749,7 @@ function formatDuration(ms: number | null): string { const totalSeconds = Math.f
 function formatTranscriptTime(ms: number): string { const totalSeconds = Math.floor(Math.max(0, ms || 0) / 1000); return `${Math.floor(totalSeconds / 60).toString().padStart(2, '0')}:${(totalSeconds % 60).toString().padStart(2, '0')}` }
 function statusLabel(status: string): string { return { READY: '排队中', CLAIMED: '已领取', LOCAL_READY: '已就绪', TRANSCRIBING: '正在识别', TRANSCRIBED: '已识别，待总结', SUMMARIZING: '正在生成总结', PROCESSING: '处理中', REVIEW: '待发布', READY_TO_UPLOAD: '待回传', COMPLETED: '已发布', FAILED: '失败' }[status] || status }
 function taskStatusLabel(task: ProcessingTask): string {
-  if (task.status === 'READY' && task.requestedWorkerId) return localPullAvailable.value ? '已请求本机领取' : '等待 Worker 领取'
+  if (task.status === 'READY') return '等待本地 Worker 自动领取'
   return statusLabel(task.status)
 }
 function taskStatusNote(status: string): string {
@@ -846,29 +846,30 @@ onBeforeUnmount(() => {
         <div class="control-settings-actions"><button class="primary-button compact-button" type="button" :disabled="loading || !adminUsername.trim() || !adminPassword" @click="loginAdminAndRefresh">登录并验证</button><span class="control-settings-hint">密码不会保存在浏览器中</span></div>
       </div>
       <details class="control-optional-settings">
-        <summary>电脑领取设置 <span>{{ localPullAvailable ? '本机模式' : '云端模式' }}</span></summary>
+        <summary>Worker 设置 <span>{{ localPullAvailable ? '本机模式' : '云端模式' }}</span></summary>
         <div class="control-optional-settings-body">
-          <label class="control-computer-field"><span>电脑端名称 <em>可选</em></span><input v-model="workerId" type="text" maxlength="128" @change="saveWorkerId" /></label>
-          <p class="control-settings-note">默认名称为 local-pc，用来标识领取任务的电脑。</p>
-          <div class="control-mode-summary"><strong>当前模式</strong><p v-if="localPullAvailable">本机模式：任务可以直接保存到这台电脑，不需要填写 Worker 凭证。</p><p v-else>云端模式：需要 Worker 凭证，才能让这台电脑自动领取服务器上的任务。</p></div>
-          <div v-if="!localPullAvailable" class="control-browser-worker"><label><span>Worker 凭证 <em>云端必填</em></span><input v-model="workerToken" type="password" autocomplete="off" placeholder="粘贴服务器的 LIVENOTE_WORKER_TOKEN" @change="saveWorkerToken" /></label><div class="control-worker-actions"><button v-if="!browserWorkerRunning" class="primary-button compact-button" type="button" @click="startBrowserWorker">启动电脑自动领取</button><button v-else class="secondary-button compact-button" type="button" @click="stopBrowserWorker">停止电脑自动领取</button><span v-if="browserWorkerRunning" class="control-status control-status-processing">运行中</span></div><p v-if="browserWorkerMessage" class="control-message">{{ browserWorkerMessage }}</p><p v-if="browserWorkerError" class="control-error">{{ browserWorkerError }}</p></div>
+          <label class="control-computer-field"><span>Worker 名称 <em>可选</em></span><input v-model="workerId" type="text" maxlength="128" @change="saveWorkerId" /></label>
+          <p class="control-settings-note">默认名称为 local-pc，用来标识处理任务的 Worker。</p>
+           <div class="control-mode-summary"><strong>当前模式</strong><p v-if="storageOnly">ECS 存储模式：本地电脑运行 Worker 下载并识别，Codex Bridge 自动生成总结；此页面只负责查看、审核和发布。</p><p v-else-if="localPullAvailable">本机模式：任务可以直接保存到这台电脑，不需要填写 Worker 凭证。</p><p v-else>云端模式：需要 Worker 凭证，才能让这台电脑自动领取服务器上的任务。</p></div>
+           <div v-if="!localPullAvailable && !storageOnly" class="control-browser-worker"><label><span>Worker 凭证 <em>云端必填</em></span><input v-model="workerToken" type="password" autocomplete="off" placeholder="粘贴服务器的 LIVENOTE_WORKER_TOKEN" @change="saveWorkerToken" /></label><div class="control-worker-actions"><button v-if="!browserWorkerRunning" class="primary-button compact-button" type="button" @click="startBrowserWorker">启动电脑自动领取</button><button v-else class="secondary-button compact-button" type="button" @click="stopBrowserWorker">停止电脑自动领取</button><span v-if="browserWorkerRunning" class="control-status control-status-processing">运行中</span></div><p v-if="browserWorkerMessage" class="control-message">{{ browserWorkerMessage }}</p><p v-if="browserWorkerError" class="control-error">{{ browserWorkerError }}</p></div>
         </div>
       </details>
     </section>
     <p v-if="message" class="control-message">{{ message }}</p><p v-if="error" class="control-error">{{ error }}<button v-if="/管理员凭证|管理员登录|请先登录/.test(error)" class="text-button compact-button control-error-action" type="button" @click="switchView('settings')">打开登录</button></p>
     <section v-if="view === 'tasks'" class="control-panel">
       <div class="control-section-heading">
-        <div><h2>处理任务</h2><p>{{ visibleTasks.length }} 个符合筛选 · 共 {{ taskTotal || tasks.length }} 个任务 · 当前电脑：{{ workerId }}</p></div>
+        <div><h2>处理任务</h2><p>{{ visibleTasks.length }} 个符合筛选 · 共 {{ taskTotal || tasks.length }} 个任务 · 当前 Worker：{{ workerId }}</p></div>
         <div class="control-task-toolbar"><select v-model="taskFilter" class="control-task-filter" aria-label="任务筛选"><option value="ALL">全部记录</option><option value="ACTIONABLE">未完成</option><option value="READY">排队中</option><option value="PROCESSING">处理中</option><option value="TRANSCRIBED">待总结</option><option value="SUMMARIZING">总结中</option><option value="REVIEW">待发布</option><option value="FAILED">失败</option><option value="COMPLETED">历史记录</option></select><div class="control-flow"><span>自动识别</span><i>→</i><span>Codex 总结</span><i>→</i><span>发布</span></div></div>
       </div>
-      <details v-if="!localPullAvailable" class="control-processing-guide"><summary>云端 Worker 处理说明</summary><ol><li>请求电脑领取任务。</li><li>电脑领取完成后，系统自动开始处理。</li><li>系统完成转写和总结后，审核并发布。</li></ol></details>
+       <details v-if="storageOnly" class="control-processing-guide"><summary>ECS 存储模式处理说明</summary><ol><li>本地 Worker 自动从 ECS 下载并校验 Chunk，无需手动指定任务。</li><li>本地 Whisper 完成识别后，本地 Codex Bridge 自动生成总结。</li><li>这里查看总结，确认无误后审核并发布。</li></ol></details>
+       <details v-else-if="!localPullAvailable" class="control-processing-guide"><summary>自动处理说明</summary><ol><li>任务进入队列后，本地 Worker 会自动领取，无需指定电脑。</li><li>Worker 完成识别后，Codex Bridge 会自动生成总结。</li><li>这里仅用于查看状态、审核和发布。</li></ol></details>
       <div v-if="visibleTasks.length" class="control-task-groups">
         <section v-for="group in taskGroups" :key="group.key" class="control-task-group">
           <header class="control-task-group-heading"><h3><button class="control-task-group-toggle" type="button" :aria-expanded="isTaskGroupExpanded(group.key)" :aria-controls="`task-group-${group.key}`" @click="toggleTaskGroup(group.key)"><span class="control-task-group-label"><svg class="control-task-group-chevron" :class="{ collapsed: !isTaskGroupExpanded(group.key) }" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg><span class="control-task-group-name">用户：{{ group.label }}</span></span><span class="control-task-group-count">{{ group.tasks.length }} 条任务<small>{{ isTaskGroupExpanded(group.key) ? '收起' : '展开' }}</small></span></button></h3></header>
           <div v-if="isTaskGroupExpanded(group.key)" :id="`task-group-${group.key}`" class="control-task-list">
         <article v-for="task in group.tasks" :key="task.id" class="control-task-row">
           <div class="control-task-main">
-            <div class="control-task-title-line"><span class="control-task-title">{{ task.title || '未命名会话' }}</span><span class="control-task-duration">{{ formatDuration(task.durationMs) }}</span><span class="control-status control-task-inline-status" :class="['control-status-' + task.status.toLowerCase(), { 'control-status-requested': task.status === 'READY' && task.requestedWorkerId }]">{{ taskStatusLabel(task) }}</span><span v-if="task.requestedWorkerId" class="control-task-worker">{{ task.requestedWorkerId }}</span></div>
+            <div class="control-task-title-line"><span class="control-task-title">{{ task.title || '未命名会话' }}</span><span class="control-task-duration">{{ formatDuration(task.durationMs) }}</span><span class="control-status control-task-inline-status" :class="'control-status-' + task.status.toLowerCase()">{{ taskStatusLabel(task) }}</span></div>
             <div class="control-task-meta-line"><span class="control-task-meta">{{ new Date(task.createdAt).toLocaleString() }}</span><div class="control-task-note"><button class="text-button compact-button" type="button" @click="beginTaskNoteEdit(task)">{{ task.adminNote ? '编辑备注' : '添加备注' }}</button><p v-if="task.adminNote" class="control-task-note-copy">备注：{{ task.adminNote }}</p></div></div>
             <div v-if="editingNoteTaskId === task.id" class="control-task-note-editor"><textarea v-model="taskNoteDraft" maxlength="2000" rows="3" placeholder="写下这条任务的处理备注，仅管理员可见"></textarea><div class="control-task-note-actions"><button class="primary-button compact-button" type="button" :disabled="savingNoteTaskId === task.id" @click="saveTaskNote(task)">{{ savingNoteTaskId === task.id ? '保存中…' : '保存备注' }}</button><button class="text-button compact-button" type="button" :disabled="savingNoteTaskId === task.id" @click="cancelTaskNoteEdit">取消</button></div></div>
             <div v-if="task.status === 'TRANSCRIBING' && task.progress" class="control-task-progress" :aria-label="`识别进度 ${task.progress.percent}%`">
@@ -883,7 +884,6 @@ onBeforeUnmount(() => {
                 <span v-if="task.status !== 'TRANSCRIBED'" class="control-task-auto-note">{{ taskStatusNote(task.status) }}</span>
                 <button v-if="task.status === 'TRANSCRIBED'" class="primary-button compact-button" type="button" :aria-label="summaryPromptTaskId === task.id ? '已复制总结指令，请在 Codex 粘贴并发送' : '复制总结指令到 Codex'" :title="summaryPromptTaskId === task.id ? '已复制，请在 Codex 粘贴并发送' : '下一步：复制指令到 Codex'" :disabled="summaryPromptBusyTaskId === task.id" @click="copySummaryPrompt(task)">{{ summaryPromptBusyTaskId === task.id ? '复制中…' : summaryPromptTaskId === task.id ? '已复制，去 Codex 发送' : '复制总结指令' }}</button>
               </template>
-              <button v-else-if="!localPullAvailable && ['READY', 'FAILED', 'REVIEW'].includes(task.status)" class="primary-button compact-button" type="button" :disabled="requestingTaskId === task.id || (task.status === 'READY' && task.requestedWorkerId === workerId)" @click="requestPull(task)">{{ requestingTaskId === task.id ? '发送中…' : task.status === 'READY' && task.requestedWorkerId === workerId ? '已请求' : task.status === 'READY' && task.requestedWorkerId ? '重新请求' : '请求电脑领取' }}</button>
               <button v-if="task.status === 'FAILED'" class="secondary-button compact-button" type="button" :disabled="requestingTaskId === task.id" @click="retryTask(task)">{{ requestingTaskId === task.id ? '重试中…' : '重试' }}</button>
               <button v-if="canViewTranscript(task)" class="secondary-button compact-button" type="button" :disabled="transcriptLoadingTaskId === task.id" @click="toggleTranscript(task)">{{ transcriptLoadingTaskId === task.id ? '读取中…' : selectedTranscriptTaskId === task.id ? '收起文字' : '查看文字' }}</button>
             </div>
@@ -942,7 +942,7 @@ onBeforeUnmount(() => {
       <p v-else class="empty-state">没有找到会话。</p>
     </section>
     <section v-else-if="view === 'users'" class="control-panel"><div class="control-section-heading"><div><h2>用户与设备</h2><p>先创建用户，再把配对码交给手机 PWA。</p></div><div class="control-create-row"><input v-model="newUserName" class="control-inline-input" placeholder="新用户名称" @keyup.enter="createUser" /><button class="primary-button compact-button" type="button" @click="createUser">创建并生成配对码</button></div></div><div v-if="users.length" class="control-task-list"><article v-for="user in users" :key="user.id" class="control-task-row"><div><strong>{{ user.displayName || user.display_name }}</strong><span>{{ user.session_count ?? 0 }} 场录音 · {{ user.device_count ?? 0 }} 台设备</span></div><button class="secondary-button compact-button" type="button" @click="createPairing(user)">生成配对码</button></article></div><p v-else class="empty-state">还没有正式用户。请先创建用户并绑定对应手机，录音上传后会自动归属。</p></section>
-    <section v-else class="control-panel control-help"><h2>设置</h2><p>当前 API 地址：<code>{{ apiBase }}</code></p><p>电脑端目录：<code>worker-inbox/</code></p><p v-if="localPullAvailable">本机领取已启用：任务会由当前服务器直接写入电脑端目录。</p><p v-else>本机领取未启用：云端需要家庭 PC Worker 常驻运行，负责自动下载任务。</p></section>
+     <section v-else class="control-panel control-help"><h2>设置</h2><p>当前 API 地址：<code>{{ apiBase }}</code></p><p>电脑端目录：<code>worker-inbox/</code></p><p v-if="storageOnly">当前为 ECS 存储模式：本地 Worker 和 Codex Bridge 负责处理，网页不直接运行本地识别。</p><p v-else-if="localPullAvailable">本机领取已启用：任务会由当前服务器直接写入电脑端目录。</p><p v-else>本机领取未启用：云端需要家庭 PC Worker 常驻运行，负责自动下载任务。</p></section>
     <div v-if="view === 'tasks' && tasks.length < taskTotal" class="control-load-more"><button class="text-button compact-button" type="button" :disabled="taskLoadingMore" @click="loadMoreTasks">{{ taskLoadingMore ? '加载中…' : `加载更多任务（${tasks.length}/${taskTotal}）` }}</button></div>
     <div v-if="view === 'sessions' && sessions.length < sessionTotal" class="control-load-more"><button class="text-button compact-button" type="button" :disabled="sessionLoadingMore" @click="loadMoreSessions">{{ sessionLoadingMore ? '加载中…' : `加载更多会话（${sessions.length}/${sessionTotal}）` }}</button></div>
   </main>

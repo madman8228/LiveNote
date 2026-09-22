@@ -169,4 +169,6 @@
 - 2026-09-21：修复前端兼容性门槛过低的问题：原先 `storageSchema >= 4` 会把当前 8000 端口的旧 schema 6 服务误判为可用；现在要求 schema 9，旧服务会明确进入“需要重启”状态并暂停上传。新增兼容性回归测试通过，播放回归套件随之通过。
 - 2026-09-21：并发审计发现两个实现偏差并修复：Worker 处理完一个窗口后若还有已到达窗口会继续排空，不再等待下一次上传；最终处理 Worker 领取任务前会等待当前 Session 的可处理增量窗口排空，避免最终 ASR 与临时窗口争抢，显式关闭增量功能时不启用该门槛。新增多窗口排空和最终任务领取门控回归；全量服务端测试达到 76 项，前端构建和播放/兼容性回归均通过。
 - 2026-09-21：继续审计管理员自动处理路径，发现其使用 `server/jobs.py` 的独立线程池，之前未受实时窗口排空门控保护，存在提前整段处理的竞态。现已补齐：自动处理请求在实时窗口未排空时持久化为 `PROCESSING/LIVE_DRAIN`，实时 Worker 排空后自动续跑；新增接口与自动恢复回归测试。Android 仍按用户要求不启动。
+- 2026-09-21：按 ECS 2C2G 存储型部署要求补齐 `LIVENOTE_PROCESSING_MODE=storage`：服务端新增原始 Chunk manifest/下载、回传本地重建音频、回传本地逐字稿并创建完成 `processing_runs` 的接口；存储模式健康状态明确关闭服务器 FFmpeg/FFprobe/ASR/增量处理，新增 `server/requirements-storage.txt`。本地 `tools/livenote_worker.py process --watch` 现在会自动领取、校验 Chunk、本地 FFmpeg 重建、本地 Whisper 转写并回传结果。隔离烟测已在无服务器 FFmpeg/Whisper/PyTorch 的存储模式下通过，现有 Codex 总结、审核发布和手机播放接口保持兼容。
+- 2026-09-21：继续补齐 ECS Web 与本地 Codex 的自动衔接：新增 `tools/livenote_codex_bridge.py watch` 和结构化总结 Schema。本地 Bridge 从 ECS 读取指定待总结任务，调用本机 `codex exec`，把结果回传 ECS；控制台识别 `storage` 模式后不再展示不兼容的浏览器音频 Worker，而是提示本地 Worker/Codex Bridge。前端构建和服务端回归继续通过。
 - 当前实现阶段的代码与本地自动化验证已完成；剩余验收集中在真实 Android Chrome 短录音、生产重启/故障恢复和线上运行指标采集。未部署、未重启生产服务、未提交或推送 Git。

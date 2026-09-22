@@ -2,6 +2,19 @@
 
 这些脚本只管理当前项目启动的 API，不会自动终止已经占用 8000 端口的进程。
 
+## 日常一键启动本地自动处理
+
+如果 ECS 只负责保存上传文件，Whisper 和 Codex 在这台电脑上运行，第一次只需要：
+
+1. 把 `livenote-local.env.example` 复制为 `livenote-local.env`。
+2. 在新文件中填写 ECS 地址、LiveNote API Key 和 Worker Token。
+3. 以后直接双击 `Start-LiveNoteStorageAutomation.cmd`。
+
+这个入口会在后台启动本地 Worker、Codex Bridge 和本地处理页面，不启动 Android，也不会重启已经运行的 API。
+启动后会自动打开 `http://127.0.0.1:8765/worker`，页面显示 ECS 连接、下载 Chunk、拼接录音、本地识别、总结回传和失败信息。
+运行日志写入项目目录下的 `.runtime-logs`。关闭页面不会停止处理；网页仍然用于查看状态、审核和发布。
+Worker 和本地总结默认每 5 分钟向 ECS 轮询一次；处理中的租约续期也按 5 分钟执行。需要调整时可设置 `LIVENOTE_WORKER_POLL_SECONDS`、`LIVENOTE_CODEX_POLL_SECONDS` 或 `LIVENOTE_WORKER_HEARTBEAT_SECONDS`。
+
 ## 一键发布检查
 
 执行完整的电脑端回归检查：

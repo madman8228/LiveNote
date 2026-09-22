@@ -18,6 +18,43 @@ uvicorn main:app --app-dir /opt/livenote/app/server --host 127.0.0.1 --port 8000
 
 Nginx 对外提供 HTTPS，并把 `/api/` 代理到本机 8000 端口。请先配置环境变量，再启动服务；不要把真实 API Key 写入仓库。
 
+## 2C2G ECS 存储模式
+
+如果 ECS 只有 2 核 2 GB，使用 `server/requirements-storage.txt`，并设置：
+
+```text
+LIVENOTE_PROCESSING_MODE=storage
+LIVENOTE_LOCAL_PULL_ENABLED=0
+LIVENOTE_LIVE_PROCESSING_ENABLED=0
+```
+
+这种模式下 ECS 只负责 HTTPS、SQLite、原始 Chunk、任务状态、逐字稿和最终音频文件，
+不安装 FFmpeg、Whisper、PyTorch，也不在服务器上做 ASR。安装完整 `server/requirements.txt`
+或开启服务器端自动处理会违背这个部署约束。
+
+本地电脑运行 `tools/livenote_worker.py process --watch`：它会自动领取任务、按 SHA-256
+校验下载 Chunk，在本地用 FFmpeg 重建整场音频，用本机 Whisper 转写，再回传逐字稿和可播放
+音频。回传完成后，现有 Codex 总结、管理员审核发布、手机读取结果的流程不变。
+
+如果希望本地 Codex 自动生成总结，再启动另一个本地进程：
+
+```powershell
+python tools/livenote_codex_bridge.py watch
+```
+
+它只从 ECS 读取 `TRANSCRIBED/SUMMARIZING` 任务的逐字稿，调用本机 `codex exec`，再把结构化
+总结回传 ECS。管理员仍在 ECS Web 页面审核并发布；也可以用 `once --task-id task-...` 只处理
+一条指定任务。
+
+Windows 也可以一次启动本地 Worker 和 Codex Bridge：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/Start-LiveNoteStorageAutomation.ps1 `
+  -ServerUrl https://你的域名/api/v1 `
+  -ApiKey 你的APIKey `
+  -WorkerToken 你的WorkerToken
+```
+
 Nginx 可以直接参考 [`nginx/livenote.conf.example`](./nginx/livenote.conf.example)。它包含：
 
 - HTTPS 和 HTTP → HTTPS 跳转
@@ -41,8 +78,11 @@ LIVENOTE_DB_PATH=/var/lib/livenote/livenote.sqlite3
 ```
 
 当前版本不在服务器上运行 Whisper、ASR 或 LLM。音频由电脑端领取后交给
-ChatGPT/Codex 人工处理，再通过控制台回传 `knowledge.json`。密钥文件应限制为
+本地 Whisper 和 Codex Bridge 自动处理，再通过控制台回传结果。密钥文件应限制为
 API 服务用户可读，不能提交到 Git。
+
+Windows 启动脚本会自动打开本地处理页面
+`http://127.0.0.1:8765/worker`，用于查看 Worker、ECS 连接、当前阶段、进度和失败信息。
 
 部署后的最低检查顺序：
 

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="/worker-favicon.svg">
+  <link rel="shortcut icon" href="/worker-favicon.svg">
+  <title>LiveNote · 本地处理中心</title>
+  <style>
+    :root { color-scheme: dark; --bg:#07131f; --panel:#102431; --panel-2:#132d3a; --line:rgba(201,224,226,.16); --ink:#edf8f5; --muted:#9fb8ba; --accent:#c2f258; --blue:#91c9ff; --amber:#f2c878; --red:#ffab9e; --green:#8ee0bf; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; background:linear-gradient(180deg,#07131f 0%,#0a1b27 100%); color:var(--ink); font:14px/1.5 "Microsoft YaHei","Noto Sans SC",system-ui,sans-serif; }
+    button, select { font:inherit; }
+    .shell { width:min(1120px,calc(100% - 32px)); margin:0 auto; padding:32px 0 48px; }
+    .topbar { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; margin-bottom:28px; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:clamp(24px,4vw,36px); letter-spacing:-.04em; }
+    .subtitle { margin-top:7px; color:var(--muted); }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+    button,.link-button { display:inline-flex; align-items:center; justify-content:center; min-height:36px; border:1px solid rgba(194,242,88,.34); border-radius:7px; background:rgba(194,242,88,.09); color:var(--accent); padding:0 13px; cursor:pointer; text-decoration:none; }
+    button:hover,.link-button:hover { background:rgba(194,242,88,.16); }
+    button:focus-visible,.link-button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    .dashboard-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .panel { border:1px solid var(--line); border-radius:12px; background:rgba(16,36,49,.88); box-shadow:0 12px 36px rgba(0,0,0,.14); }
+    .service { padding:18px; min-height:130px; }
+    .service-head { display:flex; align-items:center; gap:9px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 4px rgba(159,184,186,.12); }
+    .dot.online { background:var(--green); box-shadow:0 0 0 4px rgba(142,224,191,.13); }
+    .dot.busy { background:var(--blue); box-shadow:0 0 0 4px rgba(145,201,255,.13); }
+    .dot.error { background:var(--red); box-shadow:0 0 0 4px rgba(255,171,158,.13); }
+    .service h2 { font-size:18px; }
+    .service-state { margin-top:13px; color:var(--accent); font-weight:650; }
+    .service-message { margin-top:4px; color:var(--muted); font-size:12px; }
+    .section { margin-top:14px; padding:20px; }
+    .section-head { display:flex; justify-content:space-between; align-items:baseline; gap:14px; margin-bottom:16px; }
+    .section h2 { font-size:20px; }
+    .section-note { color:var(--muted); font-size:12px; }
+    .current-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .current { min-width:0; border:1px solid var(--line); border-radius:9px; background:rgba(19,45,58,.62); padding:16px; }
+    .current h3 { font-size:14px; color:var(--blue); }
+    .task-title { overflow:hidden; margin-top:10px; color:var(--ink); font-size:17px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
+    .task-message { margin-top:6px; color:var(--muted); }
+    .progress { height:7px; margin-top:14px; overflow:hidden; border-radius:99px; background:rgba(255,255,255,.1); }
+    .progress span { display:block; height:100%; border-radius:inherit; background:var(--accent); transition:width .25s ease; }
+    .progress-meta { display:flex; justify-content:space-between; gap:10px; margin-top:6px; color:var(--muted); font-size:11px; }
+    .empty { color:var(--muted); }
+    .event-list { display:grid; gap:0; max-height:330px; overflow:auto; }
+    .event { display:grid; grid-template-columns:145px 92px minmax(0,1fr); gap:12px; align-items:baseline; border-bottom:1px solid rgba(201,224,226,.1); padding:9px 0; }
+    .event:last-child { border-bottom:0; }
+    .event-time,.event-service { color:var(--muted); font-size:11px; }
+    .event-service { color:var(--accent); }
+    .event-message { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .log-box { margin-top:16px; }
+    .log-box summary { cursor:pointer; color:var(--muted); }
+    pre { max-height:230px; overflow:auto; margin:10px 0 0; border:1px solid var(--line); border-radius:8px; background:#081722; padding:12px; color:#c6dad8; font:12px/1.55 Consolas,"Courier New",monospace; white-space:pre-wrap; }
+    .footer-note { margin-top:18px; color:var(--muted); font-size:12px; }
+    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:1px; } .event-message { white-space:normal; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div><h1>本地处理中心</h1><p class="subtitle">LiveNote · 这台电脑正在负责下载、识别和生成总结</p></div>
+      <div class="actions"><button id="refresh" type="button">立即刷新</button><a class="link-button" href="https://livenote.yolotech.top/?mode=control" target="_blank" rel="noreferrer">打开云端管理台</a></div>
+    </header>
+    <section class="dashboard-grid" aria-label="服务状态">
+      <article class="panel service" id="worker-card"><div class="service-head"><span class="dot"></span><h2>本地 Worker</h2></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
+      <article class="panel service" id="codex-card"><div class="service-head"><span class="dot"></span><h2>本地总结</h2></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
+      <article class="panel service" id="server-card"><div class="service-head"><span class="dot"></span><h2>ECS 连接</h2></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
+    </section>
+    <section class="panel section"><div class="section-head"><h2>当前进度</h2><span class="section-note" id="updated">正在连接…</span></div><div class="current-grid"><article class="current" id="worker-current"><h3>本地 Worker</h3><p class="empty">暂无正在处理的录音</p></article><article class="current" id="codex-current"><h3>本地总结</h3><p class="empty">暂无正在生成的总结</p></article></div></section>
+    <section class="panel section"><div class="section-head"><h2>最近动态</h2><span class="section-note">本地状态每 10 秒刷新，ECS 每 5 分钟检查</span></div><div class="event-list" id="events"><p class="empty">暂时没有动态。</p></div><details class="log-box"><summary>查看后台日志</summary><pre id="logs">选择日志后加载。</pre><select id="log-name" aria-label="选择日志"><option value="storage-worker.stdout.log">Worker 正常日志</option><option value="storage-worker.stderr.log">Worker 错误日志</option><option value="codex-bridge.stdout.log">总结正常日志</option><option value="codex-bridge.stderr.log">总结错误日志</option></select></details></section>
+    <p class="footer-note">这个页面只在本机打开，关闭页面不会停止处理。任务完成后，请到云端管理台审核并发布。</p>
+  </main>
+  <script>
+    const phaseLabels = { starting:'启动中', checking:'检查任务', claiming:'领取任务', downloading:'下载录音', ready:'已准备', reconstructing:'拼接录音', transcribing:'正在识别', uploading:'回传结果', summarizing:'正在生成总结', completed:'已完成', waiting:'等待任务', failed:'处理失败', orphaned:'任务已失效', stopped:'已停止' }
+    const serviceLabels = { worker:'本地 Worker', codex:'本地总结', server:'ECS 连接' }
+    const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]))
+    const timeLabel = (value) => value ? new Date(value).toLocaleTimeString('zh-CN') : '—'
+    const phaseLabel = (value) => phaseLabels[value] || value || '未知'
+    const statusClass = (item) => item.online ? (['failed','orphaned'].includes(item.phase) ? 'error' : (['transcribing','summarizing','downloading','reconstructing','uploading','claiming'].includes(item.phase) ? 'busy' : 'online')) : (['failed','orphaned'].includes(item.phase) ? 'error' : '')
+    function renderService(id, item) { const card = document.getElementById(id + '-card'); const dot = card.querySelector('.dot'); dot.className = 'dot ' + statusClass(item); card.querySelector('.service-state').textContent = id === 'server' ? (item.online ? '连接正常' : '连接中断') : (item.online ? phaseLabel(item.phase) : (item.phase === 'failed' ? '处理失败' : '未运行')); card.querySelector('.service-message').textContent = item.message || '—' }
+    function renderCurrent(id, item) { const root = document.getElementById(id + '-current'); const task = item.task; if (!task) { root.innerHTML = `<h3>${serviceLabels[id]}</h3><p class="empty">${esc(item.message || '暂无正在处理的任务')}</p>`; return } const progress = item.progress && item.progress.total ? Math.min(100, Math.round(item.progress.current / item.progress.total * 100)) : null; root.innerHTML = `<h3>${serviceLabels[id]} · ${esc(phaseLabel(item.phase))}</h3><p class="task-title" title="${esc(task.title)}">${esc(task.title)}</p><p class="task-message">${esc(item.message || '')}</p>${progress === null ? '' : `<div class="progress" role="progressbar" aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100"><span style="width:${progress}%"></span></div><div class="progress-meta"><span>${esc(item.progress.current)} / ${esc(item.progress.total)} ${esc(item.progress.unit || '')}</span><span>${progress}%</span></div>`}` }
+    function renderEvents(events) { const root = document.getElementById('events'); if (!events.length) { root.innerHTML = '<p class="empty">暂时没有动态。</p>'; return } root.innerHTML = events.map((event) => `<div class="event"><span class="event-time">${esc(timeLabel(event.updatedAt))}</span><span class="event-service">${esc(serviceLabels[event.service] || event.service)}</span><span class="event-message">${esc(event.message || phaseLabel(event.phase))}${event.error ? ` · ${esc(event.error)}` : ''}</span></div>`).join('') }
+    async function loadLogs() { const name = document.getElementById('log-name').value; const response = await fetch('/api/logs?name=' + encodeURIComponent(name) + '&t=' + Date.now()); const data = await response.json(); document.getElementById('logs').textContent = data.lines.join('\n') || '暂无日志。' }
+    async function refresh() { try { const response = await fetch('/api/status?t=' + Date.now()); const data = await response.json(); renderService('worker', data.worker); renderService('codex', data.codex); renderService('server', data.server); renderCurrent('worker', data.worker); renderCurrent('codex', data.codex); renderEvents(data.events || []); document.getElementById('updated').textContent = '更新于 ' + timeLabel(data.updatedAt) } catch (error) { document.getElementById('updated').textContent = '页面服务连接失败'; console.error(error) } }
+    document.getElementById('refresh').addEventListener('click', refresh); document.getElementById('log-name').addEventListener('change', loadLogs); refresh(); setInterval(refresh, 10000)
+  </script>
+</body>
+</html>

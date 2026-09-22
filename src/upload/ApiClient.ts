@@ -24,6 +24,8 @@ export interface UploadStateResponse {
 }
 
 export interface ServerCapabilities {
+  processingMode?: 'local' | 'storage' | string
+  storageOnly?: boolean
   ffmpeg: boolean
   ffprobe: boolean
   manualProcessing?: boolean
@@ -292,6 +294,9 @@ async function requestWorkerBlob(path: string, workerToken: string, init: Reques
 }
 
 export const ApiClient = {
+  health() {
+    return requestJson<HealthResponse>('/health')
+  },
   adminAuthStatus() {
     return requestJson<{ configured: boolean; setupAvailable: boolean }>('/auth/admin/status')
   },
