@@ -849,8 +849,6 @@ onBeforeUnmount(() => {
       <details class="control-optional-settings">
         <summary>Worker 设置 <span>{{ localPullAvailable ? '本机模式' : '云端模式' }}</span></summary>
         <div class="control-optional-settings-body">
-          <label class="control-computer-field"><span>Worker 名称 <em>可选</em></span><input v-model="workerId" type="text" maxlength="128" @change="saveWorkerId" /></label>
-          <p class="control-settings-note">默认名称为 local-pc，用来标识处理任务的 Worker。</p>
            <div class="control-mode-summary"><strong>当前模式</strong><p v-if="storageOnly">ECS 存储模式：本地电脑运行 Worker 下载并识别，Codex Bridge 自动生成总结；此页面只负责查看、审核和发布。</p><p v-else-if="localPullAvailable">本机模式：任务可以直接保存到这台电脑，不需要填写 Worker 凭证。</p><p v-else>云端模式：需要 Worker 凭证，才能让这台电脑自动领取服务器上的任务。</p></div>
            <div v-if="!localPullAvailable && !storageOnly" class="control-browser-worker"><label><span>Worker 凭证 <em>云端必填</em></span><input v-model="workerToken" type="password" autocomplete="off" placeholder="粘贴服务器的 LIVENOTE_WORKER_TOKEN" @change="saveWorkerToken" /></label><div class="control-worker-actions"><button v-if="!browserWorkerRunning" class="primary-button compact-button" type="button" @click="startBrowserWorker">启动电脑自动领取</button><button v-else class="secondary-button compact-button" type="button" @click="stopBrowserWorker">停止电脑自动领取</button><span v-if="browserWorkerRunning" class="control-status control-status-processing">运行中</span></div><p v-if="browserWorkerMessage" class="control-message">{{ browserWorkerMessage }}</p><p v-if="browserWorkerError" class="control-error">{{ browserWorkerError }}</p></div>
         </div>
@@ -859,7 +857,7 @@ onBeforeUnmount(() => {
     <p v-if="message" class="control-message">{{ message }}</p><p v-if="error" class="control-error">{{ error }}<button v-if="view !== 'settings' && /管理员凭证|管理员登录|请先登录/.test(error)" class="text-button compact-button control-error-action" type="button" @click="switchView('settings')">打开登录区域</button></p>
     <section v-if="view === 'tasks'" class="control-panel">
       <div class="control-section-heading">
-        <div><h2>处理任务</h2><p>{{ visibleTasks.length }} 个符合筛选 · 共 {{ taskTotal || tasks.length }} 个任务 · 当前 Worker：{{ workerId }}</p></div>
+        <div><h2>处理任务</h2><p>{{ visibleTasks.length }} 个符合筛选 · 共 {{ taskTotal || tasks.length }} 个任务</p></div>
         <div class="control-task-toolbar"><select v-model="taskFilter" class="control-task-filter" aria-label="任务筛选"><option value="ALL">全部记录</option><option value="ACTIONABLE">未完成</option><option value="READY">排队中</option><option value="PROCESSING">处理中</option><option value="TRANSCRIBED">待总结</option><option value="SUMMARIZING">总结中</option><option value="REVIEW">待发布</option><option value="FAILED">失败</option><option value="COMPLETED">历史记录</option></select><div class="control-flow"><span>自动识别</span><i>→</i><span>Codex 总结</span><i>→</i><span>发布</span></div></div>
       </div>
        <details v-if="storageOnly" class="control-processing-guide"><summary>ECS 存储模式处理说明</summary><ol><li>本地 Worker 自动从 ECS 下载并校验 Chunk，无需手动指定任务。</li><li>本地 Whisper 完成识别后，本地 Codex Bridge 自动生成总结。</li><li>这里查看总结，确认无误后审核并发布。</li></ol></details>
