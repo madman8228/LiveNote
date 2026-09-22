@@ -25,7 +25,8 @@ Worker 和本地总结默认每 5 分钟向 ECS 轮询一次；处理中的租�
    不要再同时启动本地自动转写器，避免两个处理器领取同一条本地任务。
 3. 将 `livenote-multi.json.example` 复制为 `livenote-multi.json`，按需修改本地地址或
    Worker Token 环境变量。
-4. 双击 `Start-LiveNoteMultiAutomation.cmd`。Worker、Codex Bridge 和状态页会按来源
+4. 双击 `Start-LiveNoteMultiAutomation.cmd`。如果本地 8000 服务未启动，脚本会自动以
+   storage 模式启动它；Worker、Codex Bridge 和状态页会按来源
    分开运行，任务动态中会显示“本地 Server”或“ECS 云端”。
 
 多服务模式会拒绝与旧的单服务 Worker/Codex Bridge 同时启动，避免两个进程抢同一目录或租约。
