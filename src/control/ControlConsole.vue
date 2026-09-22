@@ -195,6 +195,7 @@ function controlError(cause: unknown, fallback: string): string {
   if (/管理员登录会话/i.test(raw)) return '管理员登录已失效，请重新登录。'
   if (/管理员账号已经设置|不能重复初始化/i.test(raw)) return '管理员账号已经设置，请直接登录。'
   if (/仅允许在本机执行/i.test(raw)) return '管理员初始化只能在运行服务器的电脑上完成。'
+  if (/缺少有效 API Key/i.test(raw)) return '网页暂时没有连接到服务器，请刷新页面后重试。'
   if (/\(401\)|\b401\b|凭证无效|凭证尚未配置/i.test(raw)) return '管理员登录信息无效，请到“设置”重新登录。'
   if (/\(403\)|\b403\b|没有执行此操作的权限/i.test(raw)) return '当前管理员没有执行此操作的权限。'
   if (/\(409\)|\b409\b|状态刚刚发生变化/i.test(raw)) return '任务状态刚刚发生变化，请刷新后再试。'
@@ -282,7 +283,7 @@ async function refresh(): Promise<void> {
       storageOnly.value = false
     }
     if (!adminAuthenticated.value) {
-      error.value = adminSetupAvailable.value ? '' : '请先登录管理员账号。'
+      error.value = adminSetupAvailable.value ? '' : '尚未完成管理员登录，请在上方输入账号和密码，然后点击“登录并验证”。'
       return
     }
     ApiClient.setAdminToken(adminToken.value)
@@ -855,7 +856,7 @@ onBeforeUnmount(() => {
         </div>
       </details>
     </section>
-    <p v-if="message" class="control-message">{{ message }}</p><p v-if="error" class="control-error">{{ error }}<button v-if="/管理员凭证|管理员登录|请先登录/.test(error)" class="text-button compact-button control-error-action" type="button" @click="switchView('settings')">打开登录</button></p>
+    <p v-if="message" class="control-message">{{ message }}</p><p v-if="error" class="control-error">{{ error }}<button v-if="view !== 'settings' && /管理员凭证|管理员登录|请先登录/.test(error)" class="text-button compact-button control-error-action" type="button" @click="switchView('settings')">打开登录区域</button></p>
     <section v-if="view === 'tasks'" class="control-panel">
       <div class="control-section-heading">
         <div><h2>处理任务</h2><p>{{ visibleTasks.length }} 个符合筛选 · 共 {{ taskTotal || tasks.length }} 个任务 · 当前 Worker：{{ workerId }}</p></div>
