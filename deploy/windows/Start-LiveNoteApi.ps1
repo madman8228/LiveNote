@@ -36,20 +36,25 @@ Write-Output "LiveNote API started. PID=$($process.Id), port=$Port"
 Write-Output "stdout: $stdoutPath"
 Write-Output "stderr: $stderrPath"
 
-$transcriber = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue | Where-Object {
-  ([string]$_.CommandLine) -match '(?i)tools[\\/]livenote_transcriber\.py[\s"].*\bwatch\b'
-})
-if ($transcriber.Count -eq 0) {
-  $processor = Start-Process -FilePath $Python `
-    -ArgumentList @('tools/livenote_transcriber.py', 'watch') `
-    -WorkingDirectory $projectRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $transcriberStdoutPath `
-    -RedirectStandardError $transcriberStderrPath `
-    -PassThru
-  Write-Output "LiveNote transcriber started. PID=$($processor.Id)"
-  Write-Output "transcriber stdout: $transcriberStdoutPath"
-  Write-Output "transcriber stderr: $transcriberStderrPath"
+$processingMode = ($env:LIVENOTE_PROCESSING_MODE | ForEach-Object { $_.Trim().ToLowerInvariant() })
+if ($processingMode -eq 'storage') {
+  Write-Output 'LiveNote storage mode: skip the local transcriber; the multi-server Worker owns task processing.'
 } else {
-  Write-Output "LiveNote transcriber already running. PID=$($transcriber | Select-Object -ExpandProperty ProcessId -First 1)"
+  $transcriber = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    ([string]$_.CommandLine) -match '(?i)tools[\\/]livenote_transcriber\.py[\s"].*\bwatch\b'
+  })
+  if ($transcriber.Count -eq 0) {
+    $processor = Start-Process -FilePath $Python `
+      -ArgumentList @('tools/livenote_transcriber.py', 'watch') `
+      -WorkingDirectory $projectRoot `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $transcriberStdoutPath `
+      -RedirectStandardError $transcriberStderrPath `
+      -PassThru
+    Write-Output "LiveNote transcriber started. PID=$($processor.Id)"
+    Write-Output "transcriber stdout: $transcriberStdoutPath"
+    Write-Output "transcriber stderr: $transcriberStderrPath"
+  } else {
+    Write-Output "LiveNote transcriber already running. PID=$($transcriber | Select-Object -ExpandProperty ProcessId -First 1)"
+  }
 }

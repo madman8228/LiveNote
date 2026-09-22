@@ -8,6 +8,20 @@ from tools import livenote_worker_dashboard as dashboard
 
 
 class WorkerDashboardSourceTests(unittest.TestCase):
+    def test_aggregate_status_reports_each_server_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            common = {'service': 'worker', 'phase': 'waiting', 'message': '等待任务', 'updatedAt': 9999999999999, 'task': None}
+            local = {**common, 'sourceId': 'local', 'sourceLabel': '本地 Server'}
+            ecs = {**common, 'sourceId': 'ecs', 'sourceLabel': 'ECS 云端'}
+            (runtime / 'worker-local-status.json').write_text(json.dumps(local), encoding='utf-8')
+            (runtime / 'worker-ecs-status.json').write_text(json.dumps(ecs), encoding='utf-8')
+            with patch.object(dashboard, 'RUNTIME_DIR', runtime):
+                aggregate = dashboard.aggregate_service_status('worker')
+
+        self.assertTrue(aggregate['online'])
+        self.assertEqual({source['label'] for source in aggregate['sources']}, {'本地 Server', 'ECS 云端'})
+
     def test_events_keep_same_task_ids_separate_by_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)
