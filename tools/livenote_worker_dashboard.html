@@ -65,7 +65,7 @@
     .event-title { min-width:0; color:var(--ink); font-weight:650; overflow-wrap:anywhere; }
     .event-facts { margin-top:3px; color:var(--muted); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
     .event-state { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; min-width:0; }
-    .event-status,.event-action { color:var(--muted); font-size:12px; line-height:1.35; }
+    .event-status { color:var(--muted); font-size:12px; line-height:1.35; }
     .event-status { display:inline-flex; align-items:center; min-height:24px; border:1px solid currentColor; border-radius:999px; padding:2px 8px; font-weight:700; }
     .event-status.active { color:var(--blue); background:rgba(145,201,255,.08); }
     .event-status.done { color:var(--green); background:rgba(142,224,191,.08); }
@@ -138,14 +138,13 @@
         const taskStatus = event.taskStatus || event.status || task.status || (event.phase === 'completed' ? 'COMPLETED' : event.phase === 'failed' ? 'FAILED' : '')
         const duration = event.durationMs ?? task.durationMs
         const started = event.startedAt ?? task.startedAt
-        const operation = event.message || phaseLabel(event.phase)
         const terminal = ['COMPLETED', 'REVIEW', 'FAILED'].includes(taskStatus) || ['completed', 'failed', 'orphaned'].includes(event.phase)
         const result = event.result || (event.error ? `失败：${event.error}` : terminal ? (taskStatus === 'FAILED' || event.phase === 'failed' ? '处理失败' : '已生成结果') : '尚未产生结果')
         const statusTone = taskStatus === 'FAILED' || event.phase === 'failed' || event.phase === 'orphaned' ? 'failed' : (['COMPLETED', 'REVIEW'].includes(taskStatus) || event.phase === 'completed' ? 'done' : 'active')
         const recordedAt = dateTimeLabel(started || task.createdAt || event.createdAt || event.updatedAt)
         const identity = `用户：${owner} · 任务：${title} · 录音：${recordedAt} · 时长：${durationLabel(duration)}`
         const sourceLabel = [event.sourceLabel, serviceLabels[event.service] || event.service || '后台任务'].filter(Boolean).join(' · ')
-        return `<div class="event"><span class="event-meta">${esc(timeLabel(event.updatedAt))}</span><span class="event-source">${esc(sourceLabel)}</span><div class="event-content"><div><div class="event-title-row"><span class="event-owner">用户：${esc(owner)}</span><span class="event-title" title="${esc(identity)}">${esc(title)}</span></div><div class="event-facts">录音：${esc(recordedAt)} · 时长：${esc(durationLabel(duration))} · 任务：${esc(taskId)}</div></div><div class="event-state"><span class="event-status ${statusTone}">状态：${esc(taskStatusLabel(taskStatus, phaseLabel(event.phase)))}</span><span class="event-action">当前：${esc(operation)}</span></div><div class="event-details"><div class="event-detail"><span class="event-detail-label">结果</span><span class="event-detail-value" title="${esc(result)}">${esc(result)}</span></div></div></div></div>`
+        return `<div class="event"><span class="event-meta">${esc(timeLabel(event.updatedAt))}</span><span class="event-source">${esc(sourceLabel)}</span><div class="event-content"><div><div class="event-title-row"><span class="event-owner">用户：${esc(owner)}</span><span class="event-title" title="${esc(identity)}">${esc(title)}</span></div><div class="event-facts">录音：${esc(recordedAt)} · 时长：${esc(durationLabel(duration))} · 任务：${esc(taskId)}</div></div><div class="event-state"><span class="event-status ${statusTone}">状态：${esc(taskStatusLabel(taskStatus, phaseLabel(event.phase)))}</span></div><div class="event-details"><div class="event-detail"><span class="event-detail-label">结果</span><span class="event-detail-value" title="${esc(result)}">${esc(result)}</span></div></div></div></div>`
       }).join('')
     }
     async function loadLogs() { const name = document.getElementById('log-name').value; const response = await fetch('/api/logs?name=' + encodeURIComponent(name) + '&t=' + Date.now()); const data = await response.json(); document.getElementById('logs').textContent = data.lines.join('\n') || '暂无日志。' }
