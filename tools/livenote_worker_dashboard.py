@@ -112,7 +112,13 @@ def _server_status(cache_key: str, url: str, api_key: str, source_id: str, onlin
             'storageOnly': capabilities.get('storageOnly') is True,
         }
     except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as error:
-        value = {'online': False, 'sourceId': source_id, 'message': f'{offline_message}：{error}'}
+        if source_id == 'local-server' and (
+            '10061' in str(error) or 'connection refused' in str(error).lower()
+        ):
+            message = '本地 Server 未启动，请点击“启动本地 Server”。'
+        else:
+            message = f'{offline_message}：{error}'
+        value = {'online': False, 'sourceId': source_id, 'message': message}
     with _server_cache_lock:
         _server_cache[cache_key] = (now, value)
     return dict(value)

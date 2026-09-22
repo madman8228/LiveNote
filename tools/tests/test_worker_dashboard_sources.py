@@ -41,6 +41,16 @@ class WorkerDashboardSourceTests(unittest.TestCase):
         self.assertEqual(ecs['sourceId'], 'ecs')
         self.assertEqual(ecs['message'], 'ECS 连接正常')
 
+    def test_local_connection_refused_explains_the_recovery_action(self) -> None:
+        refused = dashboard.urllib.error.URLError(OSError(10061, 'connection refused'))
+        with patch.object(dashboard, 'LOCAL_SERVER_URL', 'http://127.0.0.1:8000/api/v1'), \
+             patch.object(dashboard.urllib.request, 'urlopen', side_effect=refused):
+            dashboard._server_cache.clear()
+            local = dashboard.local_server_status()
+
+        self.assertFalse(local['online'])
+        self.assertEqual(local['message'], '本地 Server 未启动，请点击“启动本地 Server”。')
+
     def test_aggregate_status_reports_each_server_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)
