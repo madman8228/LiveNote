@@ -20,6 +20,7 @@ HTML_PATH = Path(__file__).with_name('livenote_worker_dashboard.html')
 FAVICON_PATH = Path(__file__).with_name('livenote_worker_favicon.svg')
 WORKER_INBOX = Path(os.environ.get('LIVENOTE_WORKER_INBOX', ROOT / 'worker-inbox'))
 RESTART_SCRIPT = ROOT / 'deploy' / 'windows' / 'Restart-LiveNoteWorker.ps1'
+START_LOCAL_SERVER_SCRIPT = ROOT / 'deploy' / 'windows' / 'Start-LiveNoteApi.ps1'
 MULTI_CONFIG = os.environ.get('LIVENOTE_MULTI_CONFIG', '').strip()
 MULTI_RESTART_SCRIPT = ROOT / 'deploy' / 'windows' / 'Restart-LiveNoteMultiAutomation.ps1'
 SERVER_URL = os.environ.get('LIVENOTE_SERVER_URL', '').rstrip('/')
@@ -129,6 +130,48 @@ def server_status() -> dict:
         'ecs', SERVER_URL, API_KEY, 'ecs',
         'ECS 连接正常', '未配置 ECS 地址' if not SERVER_URL else 'ECS 暂时无法连接', SERVER_CACHE_MS,
     )
+
+
+def start_local_server() -> tuple[int, dict[str, str]]:
+    if os.name != 'nt':
+        return 501, {'ok': 'false', 'message': '当前系统不支持从页面启动本地 Server。'}
+    if local_server_status().get('online') is True:
+        return 200, {'ok': 'true', 'message': '本地 Server 已经运行，无需重复启动。'}
+    if not START_LOCAL_SERVER_SCRIPT.is_file():
+        return 500, {'ok': 'false', 'message': '找不到本地 Server 启动脚本。'}
+    environment = os.environ.copy()
+    environment['LIVENOTE_PROCESSING_MODE'] = 'storage'
+    environment['LIVENOTE_LIVE_PROCESSING_ENABLED'] = '0'
+    environment['LIVENOTE_INSTANCE_ID'] = 'local'
+    environment['LIVENOTE_INSTANCE_LABEL'] = '本地 Server'
+    environment['LIVENOTE_API_KEY'] = environment.get('LIVENOTE_LOCAL_API_KEY', '')
+    environment['LIVENOTE_WORKER_TOKEN'] = environment.get('LIVENOTE_LOCAL_WORKER_TOKEN', '')
+    python = environment.get('PYTHON', 'python')
+    try:
+        creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        subprocess.Popen(
+            [
+                'powershell.exe',
+                '-NoProfile',
+                '-ExecutionPolicy',
+                'Bypass',
+                '-File',
+                str(START_LOCAL_SERVER_SCRIPT),
+                '-Port',
+                '8000',
+                '-Python',
+                python,
+            ],
+            cwd=ROOT,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creation_flags,
+        )
+    except OSError as error:
+        return 500, {'ok': 'false', 'message': f'启动本地 Server 失败：{error}'}
+    return 202, {'ok': 'true', 'message': '本地 Server 启动已开始，页面会自动刷新状态。'}
 
 
 def restart_worker() -> tuple[int, dict[str, str]]:
@@ -329,6 +372,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == '/api/local-server/start':
+            status, payload = start_local_server()
+            self.send_json(payload, status)
+            return
         if parsed.path == '/api/worker/restart':
             status, payload = restart_worker()
             self.send_json(payload, status=status)

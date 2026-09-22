@@ -23,7 +23,7 @@ if (Test-Path -LiteralPath $EnvPath) {
 & $Python (Join-Path $projectRoot "tools\livenote_multi_automation.py") --config $configFullPath --python $Python --validate-only
 if ($LASTEXITCODE -ne 0) { throw "Multi-server configuration validation failed." }
 
-$existing = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+$existing = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue | Where-Object {
   $line = [string]$_.CommandLine
   $line.Contains('livenote_worker.py') -or $line.Contains('livenote_codex_bridge.py')
 })
@@ -41,11 +41,13 @@ if ($hasLocalTarget -and -not $SkipLocalServer) {
     $previousLive = $env:LIVENOTE_LIVE_PROCESSING_ENABLED
     $previousApiKey = $env:LIVENOTE_API_KEY
     $previousWorkerToken = $env:LIVENOTE_WORKER_TOKEN
+    $previousInstanceId = $env:LIVENOTE_INSTANCE_ID
     try {
       $env:LIVENOTE_PROCESSING_MODE = "storage"
       $env:LIVENOTE_LIVE_PROCESSING_ENABLED = "0"
       $env:LIVENOTE_API_KEY = $env:LIVENOTE_LOCAL_API_KEY
       $env:LIVENOTE_WORKER_TOKEN = $env:LIVENOTE_LOCAL_WORKER_TOKEN
+      $env:LIVENOTE_INSTANCE_ID = "local"
       & (Join-Path $PSScriptRoot "Start-LiveNoteApi.ps1") -Port 8000 -Python $Python
       if ($LASTEXITCODE -ne 0) { throw "Local Server startup failed." }
     } finally {
@@ -53,6 +55,7 @@ if ($hasLocalTarget -and -not $SkipLocalServer) {
       if ($null -eq $previousLive) { Remove-Item Env:LIVENOTE_LIVE_PROCESSING_ENABLED -ErrorAction SilentlyContinue } else { Set-Item Env:LIVENOTE_LIVE_PROCESSING_ENABLED $previousLive }
       if ($null -eq $previousApiKey) { Remove-Item Env:LIVENOTE_API_KEY -ErrorAction SilentlyContinue } else { Set-Item Env:LIVENOTE_API_KEY $previousApiKey }
       if ($null -eq $previousWorkerToken) { Remove-Item Env:LIVENOTE_WORKER_TOKEN -ErrorAction SilentlyContinue } else { Set-Item Env:LIVENOTE_WORKER_TOKEN $previousWorkerToken }
+      if ($null -eq $previousInstanceId) { Remove-Item Env:LIVENOTE_INSTANCE_ID -ErrorAction SilentlyContinue } else { Set-Item Env:LIVENOTE_INSTANCE_ID $previousInstanceId }
     }
   } else {
     $healthHeaders = @{}
@@ -79,7 +82,7 @@ try {
     -RedirectStandardError (Join-Path $logRoot 'multi-automation.stderr.log') `
     -PassThru
 
-  $dashboard = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $dashboard = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue | Where-Object {
     ([string]$_.CommandLine).Contains('livenote_worker_dashboard.py')
   })
   if ($dashboard.Count -eq 0) {
