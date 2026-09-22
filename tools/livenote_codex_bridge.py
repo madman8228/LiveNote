@@ -40,15 +40,21 @@ WORKER_ID = os.environ.get('LIVENOTE_WORKER_ID', 'local-pc')
 POLL_SECONDS = max(60, int(os.environ.get('LIVENOTE_CODEX_POLL_SECONDS', '300')))
 
 
-def report_codex(phase: str, message: str, task: dict[str, Any] | None = None, error: str = '') -> None:
+def report_codex(phase: str, message: str, task: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
     task_snapshot = None
     if task:
         task_snapshot = {
             'id': task.get('taskId') or task.get('id'),
             'title': task.get('title') or task.get('sessionTitle') or '未命名录音',
+            'sessionId': task.get('sessionId'),
+            'ownerId': task.get('ownerId'),
+            'ownerName': task.get('ownerName'),
+            'createdAt': task.get('createdAt'),
+            'startedAt': task.get('startedAt'),
+            'durationMs': task.get('durationMs'),
             'status': task.get('status'),
         }
-    update_status('codex', phase, message, task=task_snapshot, error=error)
+    update_status('codex', phase, message, task=task_snapshot, error=error, record_event=record_event)
 
 
 def request_json(server: str, path: str, method: str = 'GET', payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -179,7 +185,7 @@ def process_one(server: str, task_id: str, model: str | None = None) -> bool:
 def run_once(args: argparse.Namespace) -> int:
     task_ids = find_tasks(args.server, getattr(args, 'task_id', None))
     if not task_ids:
-        report_codex('waiting', '等待新的待总结任务。')
+        report_codex('waiting', '等待新的待总结任务。', record_event=False)
         print('没有待总结任务。')
         return 0
     completed = 0

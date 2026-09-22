@@ -452,6 +452,7 @@ def task_payload(row: sqlite3.Row) -> dict[str, Any]:
         'title': row['title'] if 'title' in row.keys() else None,
         'ownerId': row['owner_id'] if 'owner_id' in row.keys() else None,
         'ownerName': row['owner_name'] if 'owner_name' in row.keys() else None,
+        'startedAt': row['started_at'] if 'started_at' in row.keys() else None,
         'durationMs': row['duration_ms'] if 'duration_ms' in row.keys() else None,
         'sessionStatus': row['session_status'] if 'session_status' in row.keys() else None,
         'status': row['status'],
@@ -486,12 +487,12 @@ def authorize_worker(request: Request | None) -> None:
         require_worker(request)
 
 
-def verify_task_lease(row: sqlite3.Row, worker_id: str | None, lease_token: str | None) -> None:
+def verify_task_lease(row: sqlite3.Row, worker_id: str | None, lease_token: str | None, *, allow_expired: bool = False) -> None:
     if row['claimed_by'] and worker_id and row['claimed_by'] != worker_id:
         raise HTTPException(status_code=409, detail='任务不属于当前 Worker')
     if row['lease_token_hash'] and (not lease_token or not secrets.compare_digest(row['lease_token_hash'], hash_secret(lease_token))):
         raise HTTPException(status_code=409, detail='任务租约无效')
-    if row['lease_expires_at'] and int(row['lease_expires_at']) < now_ms():
+    if not allow_expired and row['lease_expires_at'] and int(row['lease_expires_at']) < now_ms():
         raise HTTPException(status_code=409, detail='任务租约已过期')
 
 
@@ -1572,7 +1573,16 @@ def get_summary_input(task_id: str, request: Request) -> dict:
     validate_identifier(task_id, 'Task ID')
     authorize_worker(request)
     with connect() as connection:
-        task = connection.execute('SELECT id, session_id, status FROM processing_tasks WHERE id = ?', (task_id,)).fetchone()
+        task = connection.execute(
+            '''SELECT task.id, task.session_id, task.status, task.created_at, task.updated_at,
+                      session.title, session.owner_id, session.started_at, session.duration_ms,
+                      user.display_name AS owner_name
+               FROM processing_tasks task
+               JOIN sessions session ON session.id = task.session_id
+               LEFT JOIN users user ON user.id = session.owner_id
+               WHERE task.id = ?''',
+            (task_id,),
+        ).fetchone()
         if task is None:
             raise HTTPException(status_code=404, detail='任务不存在')
         if task['status'] not in {'TRANSCRIBED', 'SUMMARIZING', 'REVIEW', 'COMPLETED'}:
@@ -1595,7 +1605,19 @@ def get_summary_input(task_id: str, request: Request) -> dict:
         transcript = json.loads(transcript_path.read_text(encoding='utf-8'))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=500, detail=f'读取逐字稿失败：{error}') from error
-    return {'taskId': task_id, 'sessionId': task['session_id'], 'status': response_status, 'run': dict(run), 'transcript': transcript}
+    return {
+        'taskId': task_id,
+        'sessionId': task['session_id'],
+        'title': task['title'],
+        'ownerId': task['owner_id'],
+        'ownerName': task['owner_name'],
+        'createdAt': task['created_at'],
+        'startedAt': task['started_at'],
+        'durationMs': task['duration_ms'],
+        'status': response_status,
+        'run': dict(run),
+        'transcript': transcript,
+    }
 
 
 @app.post('/api/v1/tasks/{task_id}/summary-result')
@@ -1978,8 +2000,11 @@ def list_processing_tasks(request: Request, status: str = 'READY', limit: int = 
         where = '' if normalized_status == 'ALL' else 'WHERE task.status = ?'
         parameters: tuple[Any, ...] = () if normalized_status == 'ALL' else (normalized_status,)
         rows = connection.execute(
-            f'''SELECT task.*, session.title, session.duration_ms, session.status AS session_status
+            f'''SELECT task.*, session.title, session.duration_ms, session.status AS session_status,
+                       session.owner_id AS owner_id, session.started_at AS started_at,
+                       user.display_name AS owner_name
                 FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
+                LEFT JOIN users user ON user.id = session.owner_id
                 {where} ORDER BY task.created_at ASC LIMIT ?''',
             (*parameters, limit),
         ).fetchall()
@@ -1991,12 +2016,7 @@ def get_processing_task(task_id: str, request: Request) -> dict:
     validate_identifier(task_id, 'Task ID')
     authorize_worker(request)
     with connect() as connection:
-        row = connection.execute(
-            '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status
-               FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
-               WHERE task.id = ?''',
-            (task_id,),
-        ).fetchone()
+        row = _worker_task_row(connection, task_id)
     if row is None:
         raise HTTPException(status_code=404, detail='任务不存在')
     return {'task': task_payload(row)}
@@ -2004,8 +2024,11 @@ def get_processing_task(task_id: str, request: Request) -> dict:
 
 def _worker_task_row(connection: sqlite3.Connection, task_id: str) -> sqlite3.Row:
     row = connection.execute(
-        '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status
+        '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status,
+                  session.owner_id AS owner_id, session.started_at AS started_at,
+                  user.display_name AS owner_name
            FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
+           LEFT JOIN users user ON user.id = session.owner_id
            WHERE task.id = ?''',
         (task_id,),
     ).fetchone()
@@ -2203,12 +2226,7 @@ def claim_processing_task(task_id: str, payload: TaskClaimPayload, request: Requ
                claimed_by = ?, claimed_at = ?, lease_token_hash = ?, lease_expires_at = ?, error_message = '', error_stage = '', updated_at = ? WHERE id = ?''',
             (payload.workerId, claimed_at, hash_secret(lease_token), claimed_at + LEASE_DURATION_MS, claimed_at, task_id),
         )
-        task = connection.execute(
-            '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status
-               FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
-               WHERE task.id = ?''',
-            (task_id,),
-        ).fetchone()
+        task = _worker_task_row(connection, task_id)
     return {'task': task_payload(task), 'leaseToken': lease_token}
 
 
@@ -2224,7 +2242,11 @@ def update_processing_task(task_id: str, payload: TaskStatusPayload, request: Re
         row = connection.execute('SELECT status, claimed_by, lease_token_hash, lease_expires_at FROM processing_tasks WHERE id = ?', (task_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail='任务不存在')
-        verify_task_lease(row, payload.workerId, payload.leaseToken)
+        # A worker must be able to report a terminal local failure even when
+        # the long-running task crossed its lease deadline. The worker ID and
+        # lease token are still verified, so this does not allow another
+        # worker to close the task.
+        verify_task_lease(row, payload.workerId, payload.leaseToken, allow_expired=status == 'FAILED')
         allowed = {
             'CLAIMED': {'LOCAL_READY', 'FAILED'},
             'LOCAL_READY': {'PROCESSING', 'FAILED'},
@@ -2238,12 +2260,7 @@ def update_processing_task(task_id: str, payload: TaskStatusPayload, request: Re
             'UPDATE processing_tasks SET status = ?, error_message = ?, error_stage = CASE WHEN ? = \'FAILED\' THEN ? ELSE error_stage END, updated_at = ? WHERE id = ?',
             (status, payload.errorMessage, status, payload.errorMessage, updated_at, task_id),
         )
-        task = connection.execute(
-            '''SELECT task.*, session.title, session.duration_ms, session.status AS session_status
-               FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
-               WHERE task.id = ?''',
-            (task_id,),
-        ).fetchone()
+        task = _worker_task_row(connection, task_id)
     return {'task': task_payload(task)}
 
 
@@ -2260,7 +2277,7 @@ def heartbeat_processing_task(task_id: str, payload: TaskStatusPayload, request:
             raise HTTPException(status_code=409, detail=f'当前状态不能续租：{row["status"]}')
         updated_at = now_ms()
         connection.execute('UPDATE processing_tasks SET lease_expires_at = ?, updated_at = ? WHERE id = ?', (updated_at + LEASE_DURATION_MS, updated_at, task_id))
-        task = connection.execute('SELECT task.*, session.title, session.duration_ms, session.status AS session_status FROM processing_tasks task JOIN sessions session ON session.id = task.session_id WHERE task.id = ?', (task_id,)).fetchone()
+        task = _worker_task_row(connection, task_id)
     return {'task': task_payload(task)}
 
 

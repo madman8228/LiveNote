@@ -59,7 +59,7 @@ def _validate_audio_input(audio_path: Path) -> dict[str, float | None]:
         if max_volume is not None:
             details.append(f'峰值 {max_volume:.1f} dB')
         raise AsrError(
-            f'录音输入音量过低（{"，".join(details)}）。请使用 Speech 配置，提高手机 A 播放音量并重新录音。'
+            f'录音输入音量过低（{"，".join(details)}）。请确认手机 A 播放音量已调高，并检查麦克风权限、距离和录音环境后重试。'
         )
     return volume
 

@@ -40,16 +40,22 @@ POLL_SECONDS = max(60, int(os.environ.get('LIVENOTE_WORKER_POLL_SECONDS', '300')
 HEARTBEAT_SECONDS = max(60, int(os.environ.get('LIVENOTE_WORKER_HEARTBEAT_SECONDS', '300')))
 
 
-def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '') -> None:
+def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
     task_snapshot = None
     if task:
         task_snapshot = {
             'id': task.get('id'),
             'title': task.get('title') or task.get('sessionId') or '未命名录音',
+            'sessionId': task.get('sessionId'),
+            'ownerId': task.get('ownerId'),
+            'ownerName': task.get('ownerName'),
+            'createdAt': task.get('createdAt'),
+            'startedAt': task.get('startedAt'),
+            'durationMs': task.get('durationMs'),
             'status': task.get('status'),
             'durationMs': task.get('durationMs'),
         }
-    update_status('worker', phase, message, task=task_snapshot, progress=progress, error=error)
+    update_status('worker', phase, message, task=task_snapshot, progress=progress, error=error, record_event=record_event)
 
 
 def request_json(server: str, path: str, method: str = 'GET', payload: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
@@ -355,11 +361,24 @@ def pull_tasks(args: argparse.Namespace) -> int:
 
 def pull_storage_tasks(args: argparse.Namespace) -> int:
     """Claim tasks and download raw Chunks for an ECS storage-only server."""
-    report_worker('checking', '正在查看 ECS 上的新任务。')
+    report_worker('checking', '正在查看 ECS 上的新任务。', record_event=False)
     response = request_json(args.server, f'/tasks?status=ALL&limit={args.limit * 3}')
-    tasks = [task for task in response.get('tasks', []) if task.get('status') == 'READY' or (task.get('claimedBy') == args.worker_id and task.get('status') in {'CLAIMED', 'LOCAL_READY', 'PROCESSING'})][:args.limit]
+    candidates = [task for task in response.get('tasks', []) if task.get('status') == 'READY' or (task.get('claimedBy') == args.worker_id and task.get('status') in {'CLAIMED', 'LOCAL_READY', 'PROCESSING'})]
+    tasks: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if candidate.get('status') != 'READY':
+            local_task_path = args.inbox / candidate['id'] / 'task.json'
+            try:
+                local_task = json.loads(local_task_path.read_text(encoding='utf-8')) if local_task_path.is_file() else {}
+            except (OSError, json.JSONDecodeError):
+                local_task = {}
+            if local_task.get('status') == 'FAILED':
+                continue
+        tasks.append(candidate)
+        if len(tasks) >= args.limit:
+            break
     if not tasks:
-        report_worker('waiting', '等待新的录音任务。')
+        report_worker('waiting', '等待新的录音任务。', record_event=False)
         return 0
     args.inbox.mkdir(parents=True, exist_ok=True)
     processed = 0
@@ -405,12 +424,30 @@ def process_storage_task(args: argparse.Namespace, task_dir: Path) -> int:
     """Rebuild, transcribe, and upload one task entirely from the local PC."""
     task = json.loads((task_dir / 'task.json').read_text(encoding='utf-8'))
     task_id = task['id']
+    if task.get('status') == 'FAILED':
+        return 0
     report_worker('checking', '正在确认任务状态。', task)
     current_response = request_json(args.server, f'/tasks/{urllib.parse.quote(task_id)}')
     current_task = current_response.get('task', task)
     current_status = current_task.get('status')
-    if current_status in {'TRANSCRIBED', 'SUMMARIZING', 'REVIEW', 'COMPLETED'}:
+    if current_status in {'FAILED', 'TRANSCRIBED', 'SUMMARIZING', 'REVIEW', 'COMPLETED'}:
+        previous_status = task.get('status')
         (task_dir / 'task.json').write_text(json.dumps(current_task, ensure_ascii=False, indent=2), encoding='utf-8')
+        if previous_status != current_status:
+            terminal_messages = {
+                'FAILED': ('failed', '任务已标记失败，已停止继续处理。'),
+                'TRANSCRIBED': ('completed', '识别已完成，等待生成总结。'),
+                'SUMMARIZING': ('summarizing', '任务正在生成总结。'),
+                'REVIEW': ('completed', '总结已生成，等待审核。'),
+                'COMPLETED': ('completed', '任务已完成。'),
+            }
+            terminal_phase, terminal_message = terminal_messages[current_status]
+            report_worker(
+                terminal_phase,
+                terminal_message,
+                current_task,
+                error=current_task.get('errorMessage', '') if current_status == 'FAILED' else '',
+            )
         return 0
     task = current_task
     lease = load_lease(task_dir)
@@ -496,14 +533,28 @@ def process_storage_tasks(args: argparse.Namespace) -> int:
                 report_worker('orphaned', '服务器已找不到这个任务，本地录音已保留并停止重复重试。', task_snapshot, error=str(error))
                 print(f'任务已移入待核查目录：{task_dir.name} -> {orphaned_path}', file=sys.stderr)
                 continue
-            report_worker('failed', '本地处理失败。', error=str(error))
+            failed_task: dict[str, Any] | None = None
+            try:
+                failed_task = json.loads((task_dir / 'task.json').read_text(encoding='utf-8'))
+            except (OSError, json.JSONDecodeError):
+                pass
+            failure_detail = str(error)
+            if failed_task is not None:
+                failed_task['status'] = 'FAILED'
+                failed_task['errorMessage'] = str(error)
+                failed_task['errorStage'] = 'LOCAL_PROCESSING'
+                try:
+                    (task_dir / 'task.json').write_text(json.dumps(failed_task, ensure_ascii=False, indent=2), encoding='utf-8')
+                except OSError as write_error:
+                    failure_detail = f'{failure_detail}；本地失败状态保存失败：{write_error}'
             print(f'本地处理失败 {task_dir.name}: {error}', file=sys.stderr)
             try:
                 lease = load_lease(task_dir)
                 headers = worker_headers(args.worker_id, lease['leaseToken'])
                 request_json(args.server, f'/tasks/{urllib.parse.quote(task_dir.name)}/status', 'POST', {'status': 'FAILED', 'workerId': args.worker_id, 'leaseToken': lease['leaseToken'], 'errorMessage': str(error)}, headers)
-            except Exception:
-                pass
+            except Exception as status_error:
+                failure_detail = f'{failure_detail}；失败状态回传失败：{status_error}'
+            report_worker('failed', '本地处理失败。', failed_task, error=failure_detail)
         finally:
             heartbeat_stop.set()
             if heartbeat_thread is not None:
@@ -517,7 +568,7 @@ def watch_storage_tasks(args: argparse.Namespace) -> int:
     try:
         while True:
             process_storage_tasks(args)
-            report_worker('waiting', '等待新的录音任务。')
+            report_worker('waiting', '等待新的录音任务。', record_event=False)
             time.sleep(max(2, args.interval))
     except KeyboardInterrupt:
         report_worker('stopped', '本地 Worker 已停止。')

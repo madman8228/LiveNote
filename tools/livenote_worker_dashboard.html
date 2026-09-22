@@ -45,16 +45,19 @@
     .progress-meta { display:flex; justify-content:space-between; gap:10px; margin-top:6px; color:var(--muted); font-size:11px; }
     .empty { color:var(--muted); }
     .event-list { display:grid; gap:0; max-height:330px; overflow:auto; }
-    .event { display:grid; grid-template-columns:145px 92px minmax(0,1fr); gap:12px; align-items:baseline; border-bottom:1px solid rgba(201,224,226,.1); padding:9px 0; }
+    .event { display:grid; grid-template-columns:72px 100px minmax(0,1fr); gap:12px; align-items:center; min-height:34px; border-bottom:1px solid rgba(201,224,226,.1); padding:5px 0; }
     .event:last-child { border-bottom:0; }
     .event-time,.event-service { color:var(--muted); font-size:11px; }
     .event-service { color:var(--accent); }
-    .event-message { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .event-message { min-width:0; display:grid; grid-template-columns:minmax(280px,2fr) max-content max-content minmax(160px,1fr); gap:4px 8px; align-items:center; }
+    .event-title,.event-status,.event-result,.event-history { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .event-title { color:var(--ink); font-weight:650; }
+    .event-status,.event-result,.event-history { color:var(--muted); font-size:12px; line-height:1.2; }
     .log-box { margin-top:16px; }
     .log-box summary { cursor:pointer; color:var(--muted); }
     pre { max-height:230px; overflow:auto; margin:10px 0 0; border:1px solid var(--line); border-radius:8px; background:#081722; padding:12px; color:#c6dad8; font:12px/1.55 Consolas,"Courier New",monospace; white-space:pre-wrap; }
     .footer-note { margin-top:18px; color:var(--muted); font-size:12px; }
-    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:1px; } .event-message { white-space:normal; } }
+    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:3px; } .event-message { grid-template-columns:1fr; gap:3px; } }
   </style>
 </head>
 <body>
@@ -69,7 +72,7 @@
       <article class="panel service" id="server-card"><div class="service-head"><span class="dot"></span><h2>ECS 连接</h2></div><p class="service-state">读取中…</p><p class="service-message"></p></article>
     </section>
     <section class="panel section"><div class="section-head"><h2>当前进度</h2><span class="section-note" id="updated">正在连接…</span></div><div class="current-grid"><article class="current" id="worker-current"><h3>本地 Worker</h3><p class="empty">暂无正在处理的录音</p></article><article class="current" id="codex-current"><h3>本地总结</h3><p class="empty">暂无正在生成的总结</p></article></div></section>
-    <section class="panel section"><div class="section-head"><h2>最近动态</h2><span class="section-note">本地状态每 10 秒刷新，ECS 每 5 分钟检查</span></div><div class="event-list" id="events"><p class="empty">暂时没有动态。</p></div><details class="log-box"><summary>查看后台日志</summary><pre id="logs">选择日志后加载。</pre><select id="log-name" aria-label="选择日志"><option value="storage-worker.stdout.log">Worker 正常日志</option><option value="storage-worker.stderr.log">Worker 错误日志</option><option value="codex-bridge.stdout.log">总结正常日志</option><option value="codex-bridge.stderr.log">总结错误日志</option></select></details></section>
+    <section class="panel section"><div class="section-head"><h2>最近动态</h2><span class="section-note">每个任务一行 · 空闲轮询不计入</span></div><div class="event-list" id="events"><p class="empty">暂时没有动态。</p></div><details class="log-box"><summary>查看后台日志</summary><pre id="logs">选择日志后加载。</pre><select id="log-name" aria-label="选择日志"><option value="storage-worker.stdout.log">Worker 正常日志</option><option value="storage-worker.stderr.log">Worker 错误日志</option><option value="codex-bridge.stdout.log">总结正常日志</option><option value="codex-bridge.stderr.log">总结错误日志</option></select></details></section>
     <p class="footer-note">这个页面只在本机打开，关闭页面不会停止处理。任务完成后，请到云端管理台审核并发布。</p>
   </main>
   <script>
@@ -77,11 +80,47 @@
     const serviceLabels = { worker:'本地 Worker', codex:'本地总结', server:'ECS 连接' }
     const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]))
     const timeLabel = (value) => value ? new Date(value).toLocaleTimeString('zh-CN') : '—'
+    const dateTimeLabel = (value) => value ? new Date(value).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '日期未知'
+    const durationLabel = (value) => { const totalSeconds = Math.max(0, Math.round(Number(value || 0) / 1000)); if (!totalSeconds) return '时长未知'; const hours = Math.floor(totalSeconds / 3600); const minutes = Math.floor((totalSeconds % 3600) / 60); const seconds = totalSeconds % 60; return hours ? `${hours}小时${String(minutes).padStart(2, '0')}分` : `${minutes}分${String(seconds).padStart(2, '0')}秒` }
     const phaseLabel = (value) => phaseLabels[value] || value || '未知'
     const statusClass = (item) => item.online ? (['failed','orphaned'].includes(item.phase) ? 'error' : (['transcribing','summarizing','downloading','reconstructing','uploading','claiming'].includes(item.phase) ? 'busy' : 'online')) : (['failed','orphaned'].includes(item.phase) ? 'error' : '')
     function renderService(id, item) { const card = document.getElementById(id + '-card'); const dot = card.querySelector('.dot'); dot.className = 'dot ' + statusClass(item); card.querySelector('.service-state').textContent = id === 'server' ? (item.online ? '连接正常' : '连接中断') : (item.online ? phaseLabel(item.phase) : (item.phase === 'failed' ? '处理失败' : '未运行')); card.querySelector('.service-message').textContent = item.message || '—' }
     function renderCurrent(id, item) { const root = document.getElementById(id + '-current'); const task = item.task; if (!task) { root.innerHTML = `<h3>${serviceLabels[id]}</h3><p class="empty">${esc(item.message || '暂无正在处理的任务')}</p>`; return } const progress = item.progress && item.progress.total ? Math.min(100, Math.round(item.progress.current / item.progress.total * 100)) : null; root.innerHTML = `<h3>${serviceLabels[id]} · ${esc(phaseLabel(item.phase))}</h3><p class="task-title" title="${esc(task.title)}">${esc(task.title)}</p><p class="task-message">${esc(item.message || '')}</p>${progress === null ? '' : `<div class="progress" role="progressbar" aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100"><span style="width:${progress}%"></span></div><div class="progress-meta"><span>${esc(item.progress.current)} / ${esc(item.progress.total)} ${esc(item.progress.unit || '')}</span><span>${progress}%</span></div>`}` }
-    function renderEvents(events) { const root = document.getElementById('events'); if (!events.length) { root.innerHTML = '<p class="empty">暂时没有动态。</p>'; return } root.innerHTML = events.map((event) => `<div class="event"><span class="event-time">${esc(timeLabel(event.updatedAt))}</span><span class="event-service">${esc(serviceLabels[event.service] || event.service)}</span><span class="event-message">${esc(event.message || phaseLabel(event.phase))}${event.error ? ` · ${esc(event.error)}` : ''}</span></div>`).join('') }
+    const taskStatusLabels = { READY:'排队中', CLAIMED:'已领取', LOCAL_READY:'已就绪', PROCESSING:'处理中', TRANSCRIBING:'正在识别', TRANSCRIBED:'已识别，待总结', SUMMARIZING:'正在生成总结', REVIEW:'待发布', READY_TO_UPLOAD:'待回传', COMPLETED:'已完成', FAILED:'失败' }
+    const taskStatusLabel = (value, fallback) => taskStatusLabels[value] || value || fallback || '未知'
+    function renderEvents(events) {
+      const root = document.getElementById('events')
+      const rawTaskEvents = (events || []).filter((event) => event && (event.taskId || event.task?.id || event.task?.taskId))
+      if (!rawTaskEvents.length) { root.innerHTML = '<p class="empty">暂时没有已处理的任务。</p>'; return }
+      const taskEvents = rawTaskEvents.some((event) => Array.isArray(event.history)) ? rawTaskEvents : Array.from(rawTaskEvents.slice().reverse().reduce((groups, event) => {
+        const task = event.task && typeof event.task === 'object' ? event.task : {}
+        const taskId = event.taskId || task.id || task.taskId
+        const current = groups.get(taskId) || { ...event, task, taskId, history: [] }
+        const previous = current.history[current.history.length - 1]
+        const historyItem = { ...event, service: event.service || current.service, phase: event.phase || current.phase }
+        if (!previous || previous.service !== historyItem.service || previous.phase !== historyItem.phase) current.history.push(historyItem)
+        else current.history[current.history.length - 1] = historyItem
+        current.task = { ...(current.task || {}), ...task }
+        Object.assign(current, event, { task: current.task, taskId, history: current.history })
+        groups.set(taskId, current)
+        return groups
+      }, new Map()).values()).sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))
+      root.innerHTML = taskEvents.map((event) => {
+        const task = event.task && typeof event.task === 'object' ? event.task : {}
+        const taskId = event.taskId || task.id || task.taskId
+        const title = event.title || task.title || task.sessionTitle || taskId || '未知任务'
+        const owner = event.ownerName || task.ownerName || event.ownerId || task.ownerId || '未标注用户'
+        const taskStatus = event.taskStatus || event.status || task.status || (event.phase === 'completed' ? 'COMPLETED' : event.phase === 'failed' ? 'FAILED' : '')
+        const duration = event.durationMs ?? task.durationMs
+        const started = event.startedAt ?? task.startedAt
+        const history = (event.history || []).map((item) => phaseLabel(item.phase)).filter((phase, index, phases) => index === 0 || phase !== phases[index - 1])
+        const operation = history.join(' → ') || phaseLabel(event.phase)
+        const terminal = ['COMPLETED', 'REVIEW', 'FAILED'].includes(taskStatus) || ['completed', 'failed', 'orphaned'].includes(event.phase)
+        const result = event.result || (event.error ? `失败：${event.error}` : terminal ? (taskStatus === 'FAILED' || event.phase === 'failed' ? '处理失败' : '已生成结果') : '尚未产生结果')
+        const identity = `用户：${owner} · 任务：${title} · 录音：${dateTimeLabel(started || task.createdAt || event.createdAt || event.updatedAt)} · 时长：${durationLabel(duration)}`
+        return `<div class="event"><span class="event-time">${esc(timeLabel(event.updatedAt))}</span><span class="event-service">${esc(serviceLabels[event.service] || event.service || '后台任务')}</span><span class="event-message"><span class="event-title" title="${esc(identity)}">${esc(identity)}</span><span class="event-status">状态：${esc(taskStatusLabel(taskStatus, phaseLabel(event.phase)))}</span><span class="event-history" title="${esc(operation)}">处理：${esc(operation)}</span><span class="event-result" title="${esc(result)}">结果：${esc(result)}</span></span></div>`
+      }).join('')
+    }
     async function loadLogs() { const name = document.getElementById('log-name').value; const response = await fetch('/api/logs?name=' + encodeURIComponent(name) + '&t=' + Date.now()); const data = await response.json(); document.getElementById('logs').textContent = data.lines.join('\n') || '暂无日志。' }
     async function refresh() { try { const response = await fetch('/api/status?t=' + Date.now()); const data = await response.json(); renderService('worker', data.worker); renderService('codex', data.codex); renderService('server', data.server); renderCurrent('worker', data.worker); renderCurrent('codex', data.codex); renderEvents(data.events || []); document.getElementById('updated').textContent = '更新于 ' + timeLabel(data.updatedAt) } catch (error) { document.getElementById('updated').textContent = '页面服务连接失败'; console.error(error) } }
     document.getElementById('refresh').addEventListener('click', refresh); document.getElementById('log-name').addEventListener('change', loadLogs); refresh(); setInterval(refresh, 10000)

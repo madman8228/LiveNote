@@ -71,19 +71,79 @@ def server_status() -> dict:
     return dict(value)
 
 
+def _task_id(event: dict) -> str:
+    task = event.get('task') if isinstance(event.get('task'), dict) else {}
+    return str(event.get('taskId') or task.get('id') or task.get('taskId') or '')
+
+
 def recent_events(limit: int = 40) -> list[dict]:
     path = RUNTIME_DIR / 'worker-events.jsonl'
     try:
-        lines = path.read_text(encoding='utf-8').splitlines()[-limit:]
+        lines = path.read_text(encoding='utf-8').splitlines()[-300:]
     except OSError:
         return []
-    events: list[dict] = []
-    for line in reversed(lines):
+    records: dict[str, dict] = {}
+    for line in lines:
         try:
-            events.append(json.loads(line))
+            event = json.loads(line)
         except json.JSONDecodeError:
             continue
-    return events
+        task_id = _task_id(event)
+        if not task_id:
+            continue
+        task = event.get('task') if isinstance(event.get('task'), dict) else {}
+        record = records.setdefault(task_id, {
+            'taskId': task_id,
+            'title': task.get('title') or task_id,
+            'task': task or None,
+            'ownerId': task.get('ownerId'),
+            'ownerName': task.get('ownerName'),
+            'createdAt': task.get('createdAt'),
+            'startedAt': task.get('startedAt'),
+            'durationMs': task.get('durationMs'),
+            'service': event.get('service', ''),
+            'phase': event.get('phase', ''),
+            'taskStatus': task.get('status') or event.get('phase', ''),
+            'message': event.get('message', ''),
+            'error': event.get('error', ''),
+            'result': '',
+            'updatedAt': event.get('updatedAt', 0),
+            'history': [],
+        })
+        history_entry = {
+            'updatedAt': event.get('updatedAt', 0),
+            'service': event.get('service', ''),
+            'phase': event.get('phase', ''),
+            'message': event.get('message', ''),
+            'error': event.get('error', ''),
+        }
+        history = record['history']
+        if history and history[-1]['service'] == history_entry['service'] and history[-1]['phase'] == history_entry['phase']:
+            history[-1] = history_entry
+        else:
+            history.append(history_entry)
+        merged_task = dict(record.get('task') or {})
+        for key, value in task.items():
+            if value not in (None, '', '未命名录音'):
+                merged_task[key] = value
+        record.update({
+            'title': merged_task.get('title') or record['title'],
+            'task': merged_task or record['task'],
+            'ownerId': merged_task.get('ownerId') or record.get('ownerId'),
+            'ownerName': merged_task.get('ownerName') or record.get('ownerName'),
+            'createdAt': merged_task.get('createdAt') or record.get('createdAt'),
+            'startedAt': merged_task.get('startedAt') or record.get('startedAt'),
+            'durationMs': merged_task.get('durationMs') or record.get('durationMs'),
+            'service': event.get('service', record['service']),
+            'phase': event.get('phase', record['phase']),
+            'taskStatus': task.get('status') or event.get('phase', record['taskStatus']),
+            'message': event.get('message', record['message']),
+            'error': event.get('error', ''),
+            'updatedAt': event.get('updatedAt', record['updatedAt']),
+        })
+        if event.get('phase') in {'completed', 'failed', 'orphaned'}:
+            record['result'] = event.get('error') or event.get('message', '')
+    return sorted(records.values(), key=lambda record: record.get('updatedAt', 0), reverse=True)[:limit]
 
 
 def tail_log(name: str, limit: int = 80) -> list[str]:
