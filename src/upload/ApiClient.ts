@@ -138,6 +138,8 @@ export interface ProcessingTask {
   ownerName?: string | null
   durationMs: number | null
   sessionStatus: string | null
+  sourceId?: string
+  sourceLabel?: string
   status: ProcessingTaskStatus
   attempts: number
   claimedBy: string | null

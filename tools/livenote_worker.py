@@ -228,6 +228,39 @@ def load_lease(task_dir: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding='utf-8'))
 
 
+def write_task_snapshot(task_dir: Path, task: dict[str, Any]) -> None:
+    """Persist a task snapshot atomically so a crash cannot leave partial JSON."""
+    path = task_dir / 'task.json'
+    temporary = path.with_suffix(path.suffix + '.part')
+    temporary.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary.replace(path)
+
+
+def read_task_snapshot(task_dir: Path, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    path = task_dir / 'task.json'
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+        if isinstance(value, dict):
+            return value
+    except (OSError, json.JSONDecodeError):
+        pass
+    return dict(fallback or {'id': task_dir.name, 'title': task_dir.name})
+
+
+def mark_local_task_failed(task_dir: Path, error: str, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Make local failure terminal even when the original task snapshot is damaged."""
+    failed_task = read_task_snapshot(task_dir, fallback)
+    failed_task.update({
+        'id': failed_task.get('id') or task_dir.name,
+        'status': 'FAILED',
+        'errorMessage': error,
+        'errorStage': 'LOCAL_PROCESSING',
+        'updatedAt': int(time.time() * 1000),
+    })
+    write_task_snapshot(task_dir, failed_task)
+    return failed_task
+
+
 def is_missing_remote_task_error(error: Exception) -> bool:
     text = str(error)
     lowered = text.lower()
@@ -296,6 +329,64 @@ def list_tasks(args: argparse.Namespace) -> int:
         duration = (task.get('durationMs') or 0) / 1000
         print(f"{task['id']} | {task.get('status')} | {task.get('title') or '未命名'} | {duration:.0f}s | {task['sessionId']}")
     return 0
+
+
+def transcribe_with_progress(args: argparse.Namespace, task: dict[str, Any], audio_path: Path) -> dict[str, Any]:
+    """Run Whisper while keeping the dashboard alive and showing real progress."""
+    from server.asr import transcribe
+
+    started = time.monotonic()
+    lock = threading.Lock()
+    stop = threading.Event()
+    progress: dict[str, Any] = {
+        'current': 0,
+        'total': round(float(task.get('durationMs') or 0) / 1000, 1),
+        'unit': '秒',
+        'device': '检测中',
+        'indeterminate': True,
+        'elapsedSeconds': 0,
+    }
+
+    def snapshot() -> dict[str, Any]:
+        with lock:
+            current = dict(progress)
+        current['elapsedSeconds'] = round(time.monotonic() - started, 1)
+        return current
+
+    def heartbeat() -> None:
+        while not stop.wait(5):
+            current = snapshot()
+            device = current.get('device') or '检测中'
+            report_worker(
+                'transcribing',
+                f'正在使用 {device} 识别录音，已运行 {current["elapsedSeconds"]:.0f} 秒。',
+                task,
+                current,
+                record_event=False,
+            )
+
+    def on_progress(update: dict[str, Any]) -> None:
+        with lock:
+            progress.update(update)
+            progress['elapsedSeconds'] = round(time.monotonic() - started, 1)
+        current = snapshot()
+        device = current.get('device') or '检测中'
+        report_worker(
+            'transcribing',
+            f'正在使用 {device} 识别录音。',
+            task,
+            current,
+            record_event=False,
+        )
+
+    report_worker('transcribing', '正在检查音频并准备本地识别。', task, snapshot())
+    heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+    heartbeat_thread.start()
+    try:
+        return transcribe(audio_path, model_name=args.model, language=args.language, progress_callback=on_progress)
+    finally:
+        stop.set()
+        heartbeat_thread.join(timeout=2)
 
 
 def pull_tasks(args: argparse.Namespace) -> int:
@@ -465,7 +556,6 @@ def process_storage_task(args: argparse.Namespace, task_dir: Path) -> int:
     root = Path(__file__).resolve().parents[1]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from server.asr import transcribe
     from server.reconstruction import reconstruct_segment, reconstruct_session
 
     manifest = json.loads((task_dir / 'manifest.json').read_text(encoding='utf-8'))
@@ -483,8 +573,7 @@ def process_storage_task(args: argparse.Namespace, task_dir: Path) -> int:
         report_worker('reconstructing', f'正在拼接录音段（{segment_index}/{len(segments)}）。', task, {'current': segment_index, 'total': len(segments), 'unit': '录音段'})
     audio_path = reconstruct_session(runtime_data, session_id, segment_paths)
     source_hash, _ = file_sha256(audio_path)
-    report_worker('transcribing', '本地 Whisper 正在识别录音。', task)
-    transcript = transcribe(audio_path, model_name=args.model, language=args.language)
+    transcript = transcribe_with_progress(args, task, audio_path)
     transcript['sourceHash'] = source_hash
     transcript['remoteTaskId'] = task_id
     report_worker('uploading', '正在把识别结果回传 ECS。', task)
@@ -533,20 +622,12 @@ def process_storage_tasks(args: argparse.Namespace) -> int:
                 report_worker('orphaned', '服务器已找不到这个任务，本地录音已保留并停止重复重试。', task_snapshot, error=str(error))
                 print(f'任务已移入待核查目录：{task_dir.name} -> {orphaned_path}', file=sys.stderr)
                 continue
-            failed_task: dict[str, Any] | None = None
-            try:
-                failed_task = json.loads((task_dir / 'task.json').read_text(encoding='utf-8'))
-            except (OSError, json.JSONDecodeError):
-                pass
             failure_detail = str(error)
-            if failed_task is not None:
-                failed_task['status'] = 'FAILED'
-                failed_task['errorMessage'] = str(error)
-                failed_task['errorStage'] = 'LOCAL_PROCESSING'
-                try:
-                    (task_dir / 'task.json').write_text(json.dumps(failed_task, ensure_ascii=False, indent=2), encoding='utf-8')
-                except OSError as write_error:
-                    failure_detail = f'{failure_detail}；本地失败状态保存失败：{write_error}'
+            try:
+                failed_task = mark_local_task_failed(task_dir, str(error))
+            except OSError as write_error:
+                failed_task = read_task_snapshot(task_dir)
+                failure_detail = f'{failure_detail}；本地失败状态保存失败：{write_error}'
             print(f'本地处理失败 {task_dir.name}: {error}', file=sys.stderr)
             try:
                 lease = load_lease(task_dir)
@@ -569,7 +650,14 @@ def watch_storage_tasks(args: argparse.Namespace) -> int:
         while True:
             process_storage_tasks(args)
             report_worker('waiting', '等待新的录音任务。', record_event=False)
-            time.sleep(max(2, args.interval))
+            next_poll = time.monotonic() + max(2, args.interval)
+            while True:
+                remaining = next_poll - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(30, remaining))
+                if time.monotonic() < next_poll:
+                    report_worker('waiting', '等待新的录音任务。', record_event=False)
     except KeyboardInterrupt:
         report_worker('stopped', '本地 Worker 已停止。')
         print('Storage Worker 已停止。')

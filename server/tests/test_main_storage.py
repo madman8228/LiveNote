@@ -740,6 +740,27 @@ class MainStorageTests(unittest.TestCase):
             api_key_only = client.get('/api/v1/tasks', headers={'X-API-Key': 'server-browser-api-key'})
             self.assertEqual(api_key_only.status_code, 401)
 
+    def test_task_payload_includes_server_source(self) -> None:
+        session_id = 'task-source-session'
+        now = main.now_ms()
+        main.create_session(main.SessionPayload(
+            id=session_id, title='source marker', startedAt=now, endedAt=now,
+            status='COMPLETED', durationMs=1000, createdAt=now, updatedAt=now,
+        ))
+        with main.connect() as connection:
+            task_id = main.create_processing_task(connection, session_id, now)
+            row = connection.execute(
+                '''SELECT task.*, session.title, session.duration_ms,
+                          session.status AS session_status, session.owner_id AS owner_id
+                   FROM processing_tasks task JOIN sessions session ON session.id = task.session_id
+                   WHERE task.id = ?''',
+                (task_id,),
+            ).fetchone()
+        with patch.object(main, 'INSTANCE_ID', 'ecs'), patch.object(main, 'INSTANCE_LABEL', 'ECS 云端'):
+            payload = main.task_payload(row)
+        self.assertEqual(payload['sourceId'], 'ecs')
+        self.assertEqual(payload['sourceLabel'], 'ECS 云端')
+
     def test_browser_worker_can_claim_and_mark_task_local_ready(self) -> None:
         from fastapi.testclient import TestClient
 

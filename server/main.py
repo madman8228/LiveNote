@@ -65,6 +65,9 @@ LEASE_DURATION_MS = int(os.environ.get('LIVENOTE_TASK_LEASE_MS', str(30 * 60 * 1
 RUNTIME_ENV = os.environ.get('LIVENOTE_ENV', 'development').strip().lower()
 API_KEY = os.environ.get('LIVENOTE_API_KEY', '')
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get('LIVENOTE_CORS_ORIGINS', 'http://localhost:5173,https://localhost:5173').split(',') if origin.strip()]
+_default_instance_id = 'ecs' if os.environ.get('LIVENOTE_PROCESSING_MODE', 'local').strip().lower() == 'storage' else 'local'
+INSTANCE_ID = os.environ.get('LIVENOTE_INSTANCE_ID', '').strip() or _default_instance_id
+INSTANCE_LABEL = os.environ.get('LIVENOTE_INSTANCE_LABEL', '').strip() or ('ECS 云端' if INSTANCE_ID == 'ecs' else '本地 Server')
 IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 TASK_STATUSES = {'READY', 'CLAIMED', 'LOCAL_READY', 'TRANSCRIBING', 'TRANSCRIBED', 'SUMMARIZING', 'PROCESSING', 'REVIEW', 'READY_TO_UPLOAD', 'COMPLETED', 'FAILED'}
 ACTIVE_SESSION_STATUSES = ('RECORDING', 'PAUSED', 'FINALIZING')
@@ -455,6 +458,8 @@ def task_payload(row: sqlite3.Row) -> dict[str, Any]:
         'startedAt': row['started_at'] if 'started_at' in row.keys() else None,
         'durationMs': row['duration_ms'] if 'duration_ms' in row.keys() else None,
         'sessionStatus': row['session_status'] if 'session_status' in row.keys() else None,
+        'sourceId': INSTANCE_ID,
+        'sourceLabel': INSTANCE_LABEL,
         'status': row['status'],
         'attempts': row['attempts'],
         'claimedBy': row['claimed_by'],

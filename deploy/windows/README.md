@@ -15,6 +15,21 @@
 运行日志写入项目目录下的 `.runtime-logs`。关闭页面不会停止处理；网页仍然用于查看状态、审核和发布。
 Worker 和本地总结默认每 5 分钟向 ECS 轮询一次；处理中的租约续期也按 5 分钟执行。需要调整时可设置 `LIVENOTE_WORKER_POLL_SECONDS`、`LIVENOTE_CODEX_POLL_SECONDS` 或 `LIVENOTE_WORKER_HEARTBEAT_SECONDS`。
 
+## 同时处理本地 Server 和 ECS
+
+需要让同一台电脑同时处理两个来源时：
+
+1. 先确保本地 Server 和 ECS 使用不同的任务目录；多服务配置已经分别使用
+   `worker-inbox/local` 和 `worker-inbox/ecs`。
+2. 如果本地 Server 也交给电脑 Worker 处理，请让本地 Server 使用 `storage` 模式，
+   不要再同时启动本地自动转写器，避免两个处理器领取同一条本地任务。
+3. 将 `livenote-multi.json.example` 复制为 `livenote-multi.json`，按需修改本地地址或
+   Worker Token 环境变量。
+4. 双击 `Start-LiveNoteMultiAutomation.cmd`。Worker、Codex Bridge 和状态页会按来源
+   分开运行，任务动态中会显示“本地 Server”或“ECS 云端”。
+
+多服务模式会拒绝与旧的单服务 Worker/Codex Bridge 同时启动，避免两个进程抢同一目录或租约。
+
 ## 一键发布检查
 
 执行完整的电脑端回归检查：

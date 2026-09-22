@@ -884,6 +884,7 @@ audio { width: 100%; height: 40px; }
 .control-task-title-line > span { margin-top: 0; }
 .control-task-title { min-width: 0; overflow: hidden; color: var(--ink); font-size: 16px; font-weight: 680; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .control-task-duration { display: inline-flex !important; align-items: center; flex: 0 0 auto; margin: 0 !important; border: 1px solid rgba(194,242,88,.22); border-radius: 999px; background: rgba(194,242,88,.08); padding: 3px 7px; color: var(--accent) !important; font-size: 11px !important; line-height: 1 !important; white-space: nowrap !important; }
+.control-task-source { display: inline-flex !important; align-items: center; flex: 0 0 auto; margin: 0 !important; border: 1px solid rgba(153,205,226,.24); border-radius: 999px; background: rgba(153,205,226,.08); padding: 3px 7px; color: #b9ddec !important; font-size: 11px !important; line-height: 1 !important; white-space: nowrap !important; }
 .control-task-inline-status { display: inline-flex !important; align-items: center; flex: 0 0 auto; margin: 0 !important; padding: 4px 8px; font-size: 12px !important; line-height: 1 !important; }
 .control-task-path { display: flex !important; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .control-task-path span { min-width: 0; margin: 0; overflow: hidden; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }

@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 class AsrError(RuntimeError):
@@ -23,6 +23,7 @@ MIN_MEAN_VOLUME_DB = float(os.environ.get('LIVENOTE_ASR_MIN_MEAN_DB', '-48'))
 MIN_MAX_VOLUME_DB = float(os.environ.get('LIVENOTE_ASR_MIN_MAX_DB', '-32'))
 ASR_CHUNK_SECONDS = max(60, int(os.environ.get('LIVENOTE_ASR_CHUNK_SECONDS', '300')))
 ASR_CHUNK_OVERLAP_SECONDS = max(0, min(10, int(os.environ.get('LIVENOTE_ASR_CHUNK_OVERLAP_SECONDS', '1'))))
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 def _measure_audio_volume(audio_path: Path) -> dict[str, float | None]:
@@ -194,7 +195,14 @@ def _normalise_segments(result: dict[str, Any], offset_ms: int = 0, trim_before_
     return segments
 
 
-def _transcribe_long_audio(audio_path: Path, model: Any, device: str, language: str, duration_seconds: float) -> tuple[str, list[dict[str, Any]]]:
+def _transcribe_long_audio(
+    audio_path: Path,
+    model: Any,
+    device: str,
+    language: str,
+    duration_seconds: float,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     step_seconds = max(1, ASR_CHUNK_SECONDS - ASR_CHUNK_OVERLAP_SECONDS)
     all_segments: list[dict[str, Any]] = []
     text_parts: list[str] = []
@@ -202,6 +210,14 @@ def _transcribe_long_audio(audio_path: Path, model: Any, device: str, language: 
     chunk_index = 0
     while start_seconds < duration_seconds:
         chunk_duration = min(ASR_CHUNK_SECONDS, duration_seconds - start_seconds)
+        if progress_callback:
+            progress_callback({
+                'current': round(start_seconds, 1),
+                'total': round(duration_seconds, 1),
+                'unit': '秒',
+                'device': device,
+                'indeterminate': False,
+            })
         prepared_path = _prepare_audio_for_asr(audio_path, start_seconds, chunk_duration)
         try:
             result = _transcribe_prepared(model, device, prepared_path, language)
@@ -213,6 +229,14 @@ def _transcribe_long_audio(audio_path: Path, model: Any, device: str, language: 
         chunk_segments = _normalise_segments(result, offset_ms, trim_before_ms)
         all_segments.extend(chunk_segments)
         text_parts.extend(str(segment.get('text', '')).strip() for segment in chunk_segments if str(segment.get('text', '')).strip())
+        if progress_callback:
+            progress_callback({
+                'current': round(min(duration_seconds, start_seconds + chunk_duration), 1),
+                'total': round(duration_seconds, 1),
+                'unit': '秒',
+                'device': device,
+                'indeterminate': False,
+            })
         if start_seconds + chunk_duration >= duration_seconds:
             break
         start_seconds += step_seconds
@@ -222,15 +246,28 @@ def _transcribe_long_audio(audio_path: Path, model: Any, device: str, language: 
     return ' '.join(text_parts).strip(), all_segments
 
 
-def transcribe(audio_path: Path, model_name: str = DEFAULT_MODEL, language: str = 'zh') -> dict[str, Any]:
+def transcribe(
+    audio_path: Path,
+    model_name: str = DEFAULT_MODEL,
+    language: str = 'zh',
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
     if not audio_path.is_file():
         raise AsrError(f'音频文件不存在：{audio_path}')
     audio_quality = _validate_audio_input(audio_path)
     model, device = _load_model(model_name)
     duration_seconds = _probe_duration_seconds(audio_path)
+    if progress_callback:
+        progress_callback({
+            'current': 0,
+            'total': round(duration_seconds, 1),
+            'unit': '秒',
+            'device': device,
+            'indeterminate': False,
+        })
 
     if duration_seconds > ASR_CHUNK_SECONDS:
-        text, segments = _transcribe_long_audio(audio_path, model, device, language, duration_seconds)
+        text, segments = _transcribe_long_audio(audio_path, model, device, language, duration_seconds, progress_callback)
         return {
             'model': model_name,
             'device': device,
@@ -248,6 +285,14 @@ def transcribe(audio_path: Path, model_name: str = DEFAULT_MODEL, language: str 
         result = _transcribe_prepared(model, device, prepared_path, language)
     finally:
         prepared_path.unlink(missing_ok=True)
+    if progress_callback:
+        progress_callback({
+            'current': round(duration_seconds, 1),
+            'total': round(duration_seconds, 1),
+            'unit': '秒',
+            'device': device,
+            'indeterminate': False,
+        })
 
     normalised_segments = _normalise_segments(result)
     segments = [{**segment, 'index': index} for index, segment in enumerate(normalised_segments)]

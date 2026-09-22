@@ -1,0 +1,22 @@
+{
+  "targets": [
+    {
+      "id": "local",
+      "label": "本地 Server",
+      "server": "http://127.0.0.1:8000/api/v1",
+      "workerId": "local-pc-local",
+      "inbox": "worker-inbox/local",
+      "apiKeyEnv": "LIVENOTE_LOCAL_API_KEY",
+      "workerTokenEnv": "LIVENOTE_LOCAL_WORKER_TOKEN"
+    },
+    {
+      "id": "ecs",
+      "label": "ECS 云端",
+      "server": "https://livenote.yolotech.top/api/v1",
+      "workerId": "local-pc-ecs",
+      "inbox": "worker-inbox/ecs",
+      "apiKeyEnv": "LIVENOTE_API_KEY",
+      "workerTokenEnv": "LIVENOTE_WORKER_TOKEN"
+    }
+  ]
+}

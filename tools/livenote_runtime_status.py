@@ -11,15 +11,20 @@ from typing import Any
 
 
 RUNTIME_DIR = Path(os.environ.get('LIVENOTE_RUNTIME_LOG_DIR', '.runtime-logs'))
+STATUS_SCOPE = os.environ.get('LIVENOTE_RUNTIME_SCOPE', '').strip()
+SOURCE_ID = os.environ.get('LIVENOTE_SOURCE_ID', '').strip()
+SOURCE_LABEL = os.environ.get('LIVENOTE_SOURCE_LABEL', '').strip()
 _lock = threading.Lock()
 
 
 def _status_path(service: str) -> Path:
-    return RUNTIME_DIR / f'{service}-status.json'
+    suffix = f'-{STATUS_SCOPE}' if STATUS_SCOPE else ''
+    return RUNTIME_DIR / f'{service}{suffix}-status.json'
 
 
 def _events_path() -> Path:
-    return RUNTIME_DIR / 'worker-events.jsonl'
+    suffix = f'-{STATUS_SCOPE}' if STATUS_SCOPE else ''
+    return RUNTIME_DIR / f'worker-events{suffix}.jsonl'
 
 
 def update_status(service: str, phase: str, message: str, *, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
@@ -35,6 +40,10 @@ def update_status(service: str, phase: str, message: str, *, task: dict[str, Any
         'progress': progress or None,
         'error': error,
     }
+    if SOURCE_ID:
+        snapshot['sourceId'] = SOURCE_ID
+    if SOURCE_LABEL:
+        snapshot['sourceLabel'] = SOURCE_LABEL
     try:
         with _lock:
             RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
