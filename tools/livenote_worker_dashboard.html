@@ -89,6 +89,8 @@
     .event-error .event-detail-value { color:var(--red); }
     .event-structured { border-top:1px solid rgba(201,224,226,.1); padding-top:9px; }
     .event-structured summary { width:fit-content; cursor:pointer; color:var(--blue); font-size:11px; font-weight:650; }
+    .event-structured-trigger { min-height:0; border:0; border-radius:0; background:transparent; color:var(--blue); padding:0; font-size:11px; font-weight:650; }
+    .event-structured-trigger:hover,.event-structured-trigger:focus-visible { background:transparent; color:var(--ink); text-decoration:underline; text-underline-offset:3px; }
     .event-structured-body { display:grid; gap:10px; margin-top:10px; color:var(--muted); font-size:11px; line-height:1.5; }
     .event-structured-title { color:var(--ink); font-size:14px; font-weight:700; }
     .event-structured-overview { color:var(--ink); }
@@ -103,12 +105,27 @@
     .event-structured-json { margin-top:2px; }
     .event-structured-json pre { max-height:260px; margin-top:8px; }
     .event-structured-empty { color:var(--muted); }
+    body.summary-modal-open { overflow:hidden; }
+    .summary-modal[hidden] { display:none; }
+    .summary-modal { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:18px; }
+    .summary-modal-backdrop { position:absolute; inset:0; background:rgba(3,12,20,.8); backdrop-filter:blur(3px); }
+    .summary-modal-dialog { position:relative; display:grid; grid-template-rows:auto minmax(0,1fr); width:min(760px,100%); max-height:min(780px,calc(100vh - 36px)); overflow:hidden; border:1px solid rgba(145,201,255,.3); border-radius:14px; background:#102431; }
+    .summary-modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:18px 20px 14px; border-bottom:1px solid var(--line); }
+    .summary-modal-kicker { color:var(--blue); font-size:11px; font-weight:650; }
+    .summary-modal-title { margin-top:4px; color:var(--ink); font-size:20px; line-height:1.3; }
+    .summary-modal-close { flex:none; min-height:32px; border:1px solid var(--line); background:transparent; color:var(--muted); padding:4px 10px; }
+    .summary-modal-close:hover,.summary-modal-close:focus-visible { border-color:var(--accent); color:var(--accent); background:transparent; }
+    .summary-modal-body { overflow:auto; padding:18px 20px 24px; }
+    .summary-modal-body .event-structured-body { margin-top:0; font-size:13px; line-height:1.65; }
+    .summary-modal-body .event-structured-title { font-size:18px; }
+    .summary-modal-body .event-structured-section h4 { font-size:12px; }
+    .summary-modal-body .event-structured-json pre { max-height:none; }
     .log-box { margin-top:16px; }
     .log-box summary { cursor:pointer; color:var(--muted); }
     pre { max-height:230px; overflow:auto; margin:10px 0 0; border:1px solid var(--line); border-radius:8px; background:#081722; padding:12px; color:#c6dad8; font:12px/1.55 Consolas,"Courier New",monospace; white-space:pre-wrap; }
     .footer-note { margin-top:18px; color:var(--muted); font-size:12px; }
     @media (max-width:920px) { .dashboard-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .event { grid-template-columns:78px 96px minmax(0,1fr); gap:10px; } .event-content { grid-template-columns:1fr; gap:8px; } .event-timeline { grid-template-columns:repeat(2,minmax(0,1fr)); } .event-details { gap:7px; } }
-    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .current + .current { border-top:1px solid var(--line); border-left:0; margin-top:15px; padding-top:15px; padding-left:0; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:6px; padding:14px 0; } .event-meta,.event-source { padding-top:0; } .event-source { grid-template-columns:max-content minmax(0,1fr); align-items:baseline; gap:7px; } .event-state { margin-top:2px; } .event-timeline { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; } }
+    @media (max-width:760px) { .shell { width:min(100% - 22px,620px); padding-top:22px; } .topbar { display:block; } .actions { justify-content:flex-start; margin-top:16px; } .dashboard-grid,.current-grid { grid-template-columns:1fr; } .current + .current { border-top:1px solid var(--line); border-left:0; margin-top:15px; padding-top:15px; padding-left:0; } .section { padding:15px; } .event { grid-template-columns:1fr; gap:6px; padding:14px 0; } .event-meta,.event-source { padding-top:0; } .event-source { grid-template-columns:max-content minmax(0,1fr); align-items:baseline; gap:7px; } .event-state { margin-top:2px; } .event-timeline { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; } .summary-modal { padding:10px; } .summary-modal-dialog { max-height:calc(100vh - 20px); border-radius:12px; } .summary-modal-head { padding:15px 16px 12px; } .summary-modal-body { padding:15px 16px 20px; } }
   </style>
 </head>
 <body>
@@ -127,6 +144,16 @@
     <section class="panel section"><div class="section-head"><div><h2>最近动态</h2><span class="section-note" id="event-summary">当前显示 0 个任务</span></div><span class="section-note" id="updated">正在连接…</span></div><div class="event-list" id="events"><p class="empty">暂时没有动态。</p></div><details class="log-box"><summary>查看后台日志</summary><pre id="logs">选择日志后加载。</pre><select id="log-name" aria-label="选择日志"><option value="storage-worker.stdout.log">Worker 正常日志</option><option value="storage-worker.stderr.log">Worker 错误日志</option><option value="codex-bridge.stdout.log">总结正常日志</option><option value="codex-bridge.stderr.log">总结错误日志</option></select></details></section>
     <p class="footer-note">这个页面只在本机打开，关闭页面不会停止处理。任务完成后，请到云端管理台审核并发布。</p>
   </main>
+  <div class="summary-modal" id="summary-modal" hidden>
+    <div class="summary-modal-backdrop" data-summary-close></div>
+    <section class="summary-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="summary-modal-title">
+      <header class="summary-modal-head">
+        <div><p class="summary-modal-kicker">结构化总结</p><h2 class="summary-modal-title" id="summary-modal-title">查看结果</h2></div>
+        <button class="summary-modal-close" id="summary-modal-close" type="button">关闭</button>
+      </header>
+      <div class="summary-modal-body" id="summary-modal-body"></div>
+    </section>
+  </div>
   <script>
     const phaseLabels = { starting:'启动中', checking:'检查任务', claiming:'领取任务', downloading:'下载录音', ready:'已准备', reconstructing:'拼接录音', transcribing:'正在识别', uploading:'回传结果', summarizing:'正在生成总结', completed:'已完成', waiting:'等待任务', failed:'处理失败', orphaned:'任务已失效', stopped:'已停止' }
     const serviceLabels = { worker:'本地 Worker', codex:'本地总结', localServer:'本地 Server', server:'ECS 连接' }
@@ -143,6 +170,8 @@
     const summaryListMarkup = (label, items) => { const values = summaryTextList(items); return values.length ? `<section class="event-structured-section"><h4>${esc(label)}</h4><ul class="event-structured-list">${values.map((item) => `<li>${esc(item)}</li>`).join('')}</ul></section>` : '' }
     const summaryKnowledgeMarkup = (items) => { if (!Array.isArray(items) || !items.length) return ''; const sections = items.map((item) => { const title = item && typeof item === 'object' ? String(item.title || '知识要点') : '知识要点'; const points = item && typeof item === 'object' ? summaryTextList(item.points) : []; return points.length ? `<div class="event-structured-knowledge"><strong>${esc(title)}</strong><ul class="event-structured-list">${points.map((point) => `<li>${esc(point)}</li>`).join('')}</ul></div>` : '' }).filter(Boolean); return sections.length ? `<section class="event-structured-section"><h4>知识结构</h4><div class="event-structured-knowledge">${sections.join('')}</div></section>` : '' }
     const summaryQuestionsMarkup = (items) => { if (!Array.isArray(items) || !items.length) return ''; const questions = items.map((item) => { if (!item || typeof item !== 'object') return ''; const question = String(item.question || '').trim(); const answer = String(item.answer || '').trim(); return question || answer ? `<div class="event-structured-qa"><strong>${esc(question || '重要问答')}</strong><span>${esc(answer || '暂未给出回答')}</span></div>` : '' }).filter(Boolean); return questions.length ? `<section class="event-structured-section"><h4>重要问答</h4>${questions.join('')}</section>` : '' }
+    const summaryBodyMarkup = (summary) => `<div class="event-structured-body">${summary.title ? `<div class="event-structured-title">${esc(String(summary.title))}</div>` : ''}${summary.overview ? `<p class="event-structured-overview">${esc(String(summary.overview))}</p>` : ''}${summaryListMarkup('重点', summary.keyPoints)}${summaryKnowledgeMarkup(summary.knowledgeStructure)}${summaryQuestionsMarkup(summary.questions)}${summaryListMarkup('行动建议', summary.actionItems)}${summaryListMarkup('不确定性说明', summary.confidenceNotes)}<details class="event-structured-json"><summary>查看原始 JSON</summary><pre>${esc(JSON.stringify(summary, null, 2))}</pre></details></div>`
+    const structuredResults = new Map()
     const phaseLabel = (value) => phaseLabels[value] || value || '未知'
     const statusClass = (item) => item.online ? (['failed','orphaned'].includes(item.phase) ? 'error' : (['transcribing','summarizing','downloading','reconstructing','uploading','claiming'].includes(item.phase) ? 'busy' : 'online')) : (['failed','orphaned'].includes(item.phase) ? 'error' : '')
     function sourceSummary(item) { return Array.isArray(item.sources) ? item.sources.map((source) => { const label = source.label && source.label !== '未命名来源' ? source.label : serviceLabels[source.service] || serviceLabels[item.service] || source.sourceId || '本地服务'; return `${label}：${source.online ? '运行中' : '未连接'}` }).join(' · ') : '' }
@@ -154,6 +183,7 @@
     const taskStatusLabel = (value, fallback) => taskStatusLabels[value] || value || fallback || '未知'
     function renderEvents(events) {
       const root = document.getElementById('events')
+      structuredResults.clear()
       const rawTaskEvents = (events || []).filter((event) => event && (event.taskId || event.task?.id || event.task?.taskId))
       const count = document.getElementById('event-summary')
       if (!rawTaskEvents.length) { if (count) count.textContent = '当前显示 0 个任务'; root.innerHTML = '<p class="empty">暂时没有已处理的任务。</p>'; return }
@@ -202,9 +232,33 @@
         const summary = summaryDocument(summarySource)
         const hasStructuredResult = summary && typeof summary === 'object' && !Array.isArray(summary) && Object.keys(summary).length > 0
         const summarySyncError = event.summarySyncError || ''
-        const summaryMarkup = `<details class="event-structured"><summary>${hasStructuredResult ? '查看结构化结果' : summarySyncError ? '结构化结果（等待 ECS 更新）' : '结构化结果（尚未同步）'}</summary>${hasStructuredResult ? `<div class="event-structured-body">${summaryTitle ? `<div class="event-structured-title">${esc(summaryTitle)}</div>` : ''}${summary.overview ? `<p class="event-structured-overview">${esc(String(summary.overview))}</p>` : ''}${summaryListMarkup('重点', summary.keyPoints)}${summaryKnowledgeMarkup(summary.knowledgeStructure)}${summaryQuestionsMarkup(summary.questions)}${summaryListMarkup('行动建议', summary.actionItems)}${summaryListMarkup('不确定性说明', summary.confidenceNotes)}<details class="event-structured-json"><summary>查看原始 JSON</summary><pre>${esc(JSON.stringify(summary, null, 2))}</pre></details></div>` : `<p class="event-structured-empty">${esc(summarySyncError || '结构化总结尚未同步到这台电脑。')}</p>`}</details>`
+        const summaryKey = `${event.sourceId || event.sourceLabel || ''}:${taskId}`
+        if (hasStructuredResult) structuredResults.set(summaryKey, summary)
+        const summaryMarkup = hasStructuredResult ? `<div class="event-structured"><button class="event-structured-trigger" type="button" data-summary-key="${esc(summaryKey)}">查看结构化结果</button></div>` : `<div class="event-structured"><p class="event-structured-empty">${esc(summarySyncError || '结构化总结尚未同步到这台电脑。')}</p></div>`
         return `<div class="event"><div class="event-meta"><span class="event-meta-label">最新更新时间</span><time>${esc(dateTimeLabel(event.updatedAt))}</time></div><div class="event-source"><span class="event-source-label">任务来源</span><strong>${esc(sourceLabel)}</strong></div><div class="event-content"><div><div class="event-title-row"><span class="event-owner">用户：${esc(owner)}</span><span class="event-title" title="${esc(identity)}">${esc(titleWithDuration)}</span></div><div class="event-facts">任务：${esc(taskId)}</div></div><div class="event-state"><span class="event-status ${statusTone}">状态：${esc(taskStatusLabel(taskStatus, phaseLabel(event.phase)))}</span></div><div class="event-details"><div class="event-timeline"><div class="event-detail"><span class="event-detail-label">任务创建时间</span><span class="event-detail-value">${esc(optionalDateTime(taskCreatedAt))}</span></div><div class="event-detail"><span class="event-detail-label">上传服务器时间</span><span class="event-detail-value">${esc(optionalDateTime(uploadedAt))}</span></div><div class="event-detail"><span class="event-detail-label">录音原始时间</span><span class="event-detail-value">${esc(optionalDateTime(started))}</span></div><div class="event-detail"><span class="event-detail-label">Worker 拉取时间</span><span class="event-detail-value">${esc(optionalDateTime(claimedAt))}</span></div><div class="event-detail"><span class="event-detail-label">下载完成时间</span><span class="event-detail-value">${esc(optionalDateTime(downloadedAt))}</span></div><div class="event-detail"><span class="event-detail-label">录音时长</span><span class="event-detail-value">${esc(durationValueLabel(duration))}</span></div><div class="event-detail"><span class="event-detail-label">Worker 处理时长</span><span class="event-detail-value">${esc(durationValueLabel(workerDuration))}</span></div><div class="event-detail"><span class="event-detail-label">处理阶段</span><span class="event-detail-value">${esc(processingPhase)}</span></div></div><div class="event-detail event-result"><span class="event-detail-label">结果</span><span class="event-detail-value" title="${esc(result)}">${esc(result)}</span></div>${error ? `<div class="event-detail event-error"><span class="event-detail-label">错误原因</span><span class="event-detail-value" title="${esc(error)}">${esc(error)}</span></div>` : ''}${summaryMarkup}</div></div></div>`
       }).join('')
+    }
+    let summaryModalPreviousFocus = null
+    function closeSummaryModal() {
+      const modal = document.getElementById('summary-modal')
+      if (!modal || modal.hidden) return
+      modal.hidden = true
+      document.body.classList.remove('summary-modal-open')
+      if (summaryModalPreviousFocus && typeof summaryModalPreviousFocus.focus === 'function') summaryModalPreviousFocus.focus()
+      summaryModalPreviousFocus = null
+    }
+    function openSummaryModal(summary) {
+      const modal = document.getElementById('summary-modal')
+      const title = document.getElementById('summary-modal-title')
+      const body = document.getElementById('summary-modal-body')
+      const documentValue = summaryDocument(summary)
+      if (!modal || !title || !body || !documentValue || !Object.keys(documentValue).length) return
+      summaryModalPreviousFocus = document.activeElement
+      title.textContent = documentValue.title || '查看结果'
+      body.innerHTML = summaryBodyMarkup(documentValue)
+      modal.hidden = false
+      document.body.classList.add('summary-modal-open')
+      document.getElementById('summary-modal-close')?.focus()
     }
     async function loadLogs() { const name = document.getElementById('log-name').value; const response = await fetch('/api/logs?name=' + encodeURIComponent(name) + '&t=' + Date.now()); const data = await response.json(); document.getElementById('logs').textContent = data.lines.join('\n') || '暂无日志。' }
     let latestStatus = null
@@ -214,6 +268,10 @@
     async function startLocalServer() { const button = document.getElementById('start-local-server'); const status = document.getElementById('start-local-server-status'); const dot = document.querySelector('#localServer-card .dot'); button.disabled = true; status.textContent = ''; dot.className = 'dot busy'; try { const response = await fetch('/api/local-server/start', { method:'POST' }); const data = await response.json(); if (!response.ok) { status.textContent = data.message || '启动失败。'; dot.className = 'dot error'; button.disabled = false } else { setTimeout(refresh, 1000) } } catch (error) { status.textContent = '页面服务连接失败。'; dot.className = 'dot error'; button.disabled = false } }
     document.getElementById('restart-worker').addEventListener('click', restartWorker)
     document.getElementById('start-local-server').addEventListener('click', startLocalServer)
+    document.getElementById('events').addEventListener('click', (event) => { const target = event.target instanceof Element ? event.target.closest('[data-summary-key]') : null; if (!target) return; openSummaryModal(structuredResults.get(target.dataset.summaryKey)) })
+    document.getElementById('summary-modal-close').addEventListener('click', closeSummaryModal)
+    document.querySelector('[data-summary-close]').addEventListener('click', closeSummaryModal)
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeSummaryModal() })
     document.getElementById('refresh').addEventListener('click', refresh); document.getElementById('log-name').addEventListener('change', loadLogs); refresh(); setInterval(refreshCountdown, 1000); setInterval(refresh, 10000)
   </script>
 </body>
