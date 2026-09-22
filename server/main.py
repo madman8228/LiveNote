@@ -48,10 +48,10 @@ try:
 except ImportError:
     from .live_processing import LiveProcessingWorker, ensure_live_run, live_processing_has_pending_windows, live_processing_status, retry_live_run
 try:
-    from auth import admin_auth_configured, admin_setup_available, authenticate_device, bearer_token, create_admin_credentials, create_admin_session, generate_device_token, generate_pairing_code, hash_secret, new_id, require_admin, require_worker
+    from auth import admin_auth_configured, admin_setup_available, authenticate_device, bearer_token, create_admin_credentials, create_admin_session, generate_device_token, generate_pairing_code, has_valid_worker_token, hash_secret, new_id, require_admin, require_worker
     from migrations import backup_before_migration, ensure_schema
 except ImportError:
-    from .auth import admin_auth_configured, admin_setup_available, authenticate_device, bearer_token, create_admin_credentials, create_admin_session, generate_device_token, generate_pairing_code, hash_secret, new_id, require_admin, require_worker
+    from .auth import admin_auth_configured, admin_setup_available, authenticate_device, bearer_token, create_admin_credentials, create_admin_session, generate_device_token, generate_pairing_code, has_valid_worker_token, hash_secret, new_id, require_admin, require_worker
     from .migrations import backup_before_migration, ensure_schema
 
 SERVER_DIR = Path(__file__).resolve().parent
@@ -573,7 +573,7 @@ app.add_middleware(
 async def api_key_middleware(request: Request, call_next):
     if API_KEY and request.url.path.startswith('/api/v1/'):
         provided = request.headers.get('x-api-key', '')
-        if not secrets.compare_digest(provided, API_KEY):
+        if not secrets.compare_digest(provided, API_KEY) and not has_valid_worker_token(request):
             return JSONResponse(status_code=401, content={'detail': '缺少有效 API Key'})
     return await call_next(request)
 

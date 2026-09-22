@@ -78,7 +78,8 @@ LIVENOTE_DB_PATH=/var/lib/livenote/livenote.sqlite3
 ```
 
 当前版本不在服务器上运行 Whisper、ASR 或 LLM。音频由电脑端领取后交给
-本地 Whisper 和 Codex Bridge 自动处理，再通过控制台回传结果。密钥文件应限制为
+本地 Whisper 和 Codex Bridge 自动处理，再通过控制台回传结果。Worker 只使用独立的
+`LIVENOTE_WORKER_TOKEN`，不需要复制服务器级 `LIVENOTE_API_KEY`。密钥文件应限制为
 API 服务用户可读，不能提交到 Git。
 
 Windows 启动脚本会自动打开本地处理页面

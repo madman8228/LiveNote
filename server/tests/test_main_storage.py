@@ -723,6 +723,23 @@ class MainStorageTests(unittest.TestCase):
             else:
                 os.environ['LIVENOTE_WORKER_TOKEN'] = previous_worker
 
+    def test_worker_credential_can_access_task_api_without_server_api_key(self) -> None:
+        from fastapi.testclient import TestClient
+
+        with patch.object(main, 'API_KEY', 'server-browser-api-key'), patch.dict(
+            os.environ, {'LIVENOTE_WORKER_TOKEN': 'worker-only-token'}
+        ):
+            client = TestClient(main.app)
+            missing_credentials = client.get('/api/v1/tasks')
+            self.assertEqual(missing_credentials.status_code, 401)
+            self.assertEqual(missing_credentials.json()['detail'], '缺少有效 API Key')
+
+            worker_only = client.get('/api/v1/tasks', headers={'X-Worker-Token': 'worker-only-token'})
+            self.assertEqual(worker_only.status_code, 200, worker_only.text)
+
+            api_key_only = client.get('/api/v1/tasks', headers={'X-API-Key': 'server-browser-api-key'})
+            self.assertEqual(api_key_only.status_code, 401)
+
     def test_browser_worker_can_claim_and_mark_task_local_ready(self) -> None:
         from fastapi.testclient import TestClient
 

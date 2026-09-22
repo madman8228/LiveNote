@@ -7,7 +7,7 @@
 如果 ECS 只负责保存上传文件，Whisper 和 Codex 在这台电脑上运行，第一次只需要：
 
 1. 把 `livenote-local.env.example` 复制为 `livenote-local.env`。
-2. 在新文件中填写 ECS 地址、LiveNote API Key 和 Worker Token。
+2. 在新文件中填写 ECS 地址和 Worker Token；本机 Worker 不需要复制服务器 API Key。
 3. 以后直接双击 `Start-LiveNoteStorageAutomation.cmd`。
 
 这个入口会在后台启动本地 Worker、Codex Bridge 和本地处理页面，不启动 Android，也不会重启已经运行的 API。

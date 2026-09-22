@@ -177,6 +177,20 @@ def require_worker(request: Request) -> str:
     return require_static_token(request, 'LIVENOTE_WORKER_TOKEN', 'worker')
 
 
+def has_valid_worker_token(request: Request | None) -> bool:
+    """Return whether a request carries the configured Worker credential.
+
+    This is intentionally separate from ``require_worker`` so the API gateway
+    can let authenticated Workers reach their task endpoints without also
+    requiring the server-wide browser/API key.
+    """
+    expected = os.environ.get('LIVENOTE_WORKER_TOKEN', '').strip()
+    if not expected or request is None:
+        return False
+    supplied = request.headers.get('x-worker-token', '') or bearer_token(request)
+    return bool(supplied) and hmac.compare_digest(supplied, expected)
+
+
 def generate_pairing_code() -> str:
     return f'{secrets.randbelow(1_000_000):06d}'
 
