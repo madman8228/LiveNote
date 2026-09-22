@@ -24,11 +24,13 @@ MULTI_CONFIG = os.environ.get('LIVENOTE_MULTI_CONFIG', '').strip()
 MULTI_RESTART_SCRIPT = ROOT / 'deploy' / 'windows' / 'Restart-LiveNoteMultiAutomation.ps1'
 SERVER_URL = os.environ.get('LIVENOTE_SERVER_URL', '').rstrip('/')
 API_KEY = os.environ.get('LIVENOTE_API_KEY', '')
+LOCAL_SERVER_URL = os.environ.get('LIVENOTE_LOCAL_SERVER_URL', 'http://127.0.0.1:8000/api/v1').rstrip('/')
+LOCAL_API_KEY = os.environ.get('LIVENOTE_LOCAL_API_KEY', '')
 STALE_AFTER_MS = 45_000
 SERVER_CACHE_MS = max(60_000, int(os.environ.get('LIVENOTE_DASHBOARD_SERVER_CACHE_SECONDS', '300')) * 1000)
+LOCAL_SERVER_CACHE_MS = max(5_000, int(os.environ.get('LIVENOTE_DASHBOARD_LOCAL_SERVER_CACHE_SECONDS', '10')) * 1000)
 _server_cache_lock = threading.Lock()
-_server_cache_updated_at = 0
-_server_cache_value: dict = {}
+_server_cache: dict[str, tuple[int, dict]] = {}
 
 
 def read_json(path: Path) -> dict:
@@ -83,35 +85,50 @@ def aggregate_service_status(name: str) -> dict:
     return aggregate
 
 
-def server_status() -> dict:
-    global _server_cache_updated_at, _server_cache_value
+def _server_status(cache_key: str, url: str, api_key: str, source_id: str, online_message: str, offline_message: str, cache_ms: int) -> dict:
     now = int(time.time() * 1000)
     with _server_cache_lock:
-        if _server_cache_updated_at and now - _server_cache_updated_at < SERVER_CACHE_MS:
-            return dict(_server_cache_value)
-    if not SERVER_URL:
-        value = {'online': False, 'message': '未配置 ECS 地址'}
+        cached = _server_cache.get(cache_key)
+        if cached and now - cached[0] < cache_ms:
+            return dict(cached[1])
+    if not url:
+        value = {'online': False, 'sourceId': source_id, 'message': offline_message}
         with _server_cache_lock:
-            _server_cache_updated_at, _server_cache_value = now, value
+            _server_cache[cache_key] = (now, value)
         return dict(value)
-    request = urllib.request.Request(f'{SERVER_URL}/health', headers={'Accept': 'application/json'})
-    if API_KEY:
-        request.add_header('X-API-Key', API_KEY)
+    request = urllib.request.Request(f'{url}/health', headers={'Accept': 'application/json'})
+    if api_key:
+        request.add_header('X-API-Key', api_key)
     try:
         with urllib.request.urlopen(request, timeout=4) as response:
             payload = json.loads(response.read().decode('utf-8'))
         capabilities = payload.get('capabilities') or {}
         value = {
             'online': True,
-            'message': 'ECS 连接正常',
+            'sourceId': source_id,
+            'message': online_message,
             'processingMode': capabilities.get('processingMode'),
             'storageOnly': capabilities.get('storageOnly') is True,
         }
     except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as error:
-        value = {'online': False, 'message': f'ECS 暂时无法连接：{error}'}
+        value = {'online': False, 'sourceId': source_id, 'message': f'{offline_message}：{error}'}
     with _server_cache_lock:
-        _server_cache_updated_at, _server_cache_value = now, value
+        _server_cache[cache_key] = (now, value)
     return dict(value)
+
+
+def local_server_status() -> dict:
+    return _server_status(
+        'local', LOCAL_SERVER_URL, LOCAL_API_KEY, 'local-server',
+        '本地 Server 运行正常', '本地 Server 未运行', LOCAL_SERVER_CACHE_MS,
+    )
+
+
+def server_status() -> dict:
+    return _server_status(
+        'ecs', SERVER_URL, API_KEY, 'ecs',
+        'ECS 连接正常', '未配置 ECS 地址' if not SERVER_URL else 'ECS 暂时无法连接', SERVER_CACHE_MS,
+    )
 
 
 def restart_worker() -> tuple[int, dict[str, str]]:
@@ -297,6 +314,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 'workerSources': scoped_service_statuses('worker'),
                 'codex': aggregate_service_status('codex'),
                 'codexSources': scoped_service_statuses('codex'),
+                'localServer': local_server_status(),
                 'server': server_status(),
                 'events': recent_events(),
                 'updatedAt': int(time.time() * 1000),

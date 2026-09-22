@@ -61,6 +61,23 @@ def update_status(service: str, phase: str, message: str, *, task: dict[str, Any
         pass
 
 
+def refresh_status(service: str) -> None:
+    """Touch an existing status snapshot without changing its visible state."""
+    try:
+        with _lock:
+            target = _status_path(service)
+            snapshot = json.loads(target.read_text(encoding='utf-8'))
+            snapshot['updatedAt'] = int(time.time() * 1000)
+            snapshot['pid'] = os.getpid()
+            temporary = target.with_suffix(target.suffix + '.part')
+            temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding='utf-8')
+            temporary.replace(target)
+    except (OSError, json.JSONDecodeError):
+        # Status is diagnostic; a locked, unavailable, or not-yet-created
+        # snapshot must not stop processing.
+        pass
+
+
 def _trim_events() -> None:
     path = _events_path()
     try:

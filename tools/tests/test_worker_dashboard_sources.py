@@ -8,6 +8,39 @@ from tools import livenote_worker_dashboard as dashboard
 
 
 class WorkerDashboardSourceTests(unittest.TestCase):
+    def test_local_and_ecs_server_health_are_reported_separately(self) -> None:
+        class Response:
+            def __init__(self, payload: dict) -> None:
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps(self.payload).encode('utf-8')
+
+        def open_url(request, timeout=0):
+            if request.full_url.startswith('http://127.0.0.1:8000'):
+                return Response({'capabilities': {'processingMode': 'storage', 'storageOnly': True}})
+            return Response({'capabilities': {'processingMode': 'storage', 'storageOnly': True}})
+
+        with patch.object(dashboard, 'LOCAL_SERVER_URL', 'http://127.0.0.1:8000/api/v1'), \
+             patch.object(dashboard, 'SERVER_URL', 'https://ecs.example/api/v1'), \
+             patch.object(dashboard.urllib.request, 'urlopen', side_effect=open_url):
+            dashboard._server_cache.clear()
+            local = dashboard.local_server_status()
+            ecs = dashboard.server_status()
+
+        self.assertTrue(local['online'])
+        self.assertEqual(local['sourceId'], 'local-server')
+        self.assertEqual(local['message'], '本地 Server 运行正常')
+        self.assertTrue(ecs['online'])
+        self.assertEqual(ecs['sourceId'], 'ecs')
+        self.assertEqual(ecs['message'], 'ECS 连接正常')
+
     def test_aggregate_status_reports_each_server_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)

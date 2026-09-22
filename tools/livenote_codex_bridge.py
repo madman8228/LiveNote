@@ -27,9 +27,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from livenote_runtime_status import update_status
+    from livenote_runtime_status import refresh_status, update_status
 except ImportError:
-    from tools.livenote_runtime_status import update_status
+    from tools.livenote_runtime_status import refresh_status, update_status
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +38,7 @@ API_KEY = os.environ.get('LIVENOTE_API_KEY', '')
 WORKER_TOKEN = os.environ.get('LIVENOTE_WORKER_TOKEN', '')
 WORKER_ID = os.environ.get('LIVENOTE_WORKER_ID', 'local-pc')
 POLL_SECONDS = max(60, int(os.environ.get('LIVENOTE_CODEX_POLL_SECONDS', '300')))
+HEARTBEAT_SECONDS = max(5, int(os.environ.get('LIVENOTE_CODEX_HEARTBEAT_SECONDS', '10')))
 
 
 def report_codex(phase: str, message: str, task: dict[str, Any] | None = None, error: str = '', record_event: bool = True) -> None:
@@ -204,7 +205,13 @@ def run_watch(args: argparse.Namespace) -> int:
     try:
         while True:
             run_once(args)
-            time.sleep(max(60, args.interval))
+            deadline = time.monotonic() + max(60, args.interval)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(HEARTBEAT_SECONDS, remaining))
+                refresh_status('codex')
     except KeyboardInterrupt:
         report_codex('stopped', '本地 Codex Bridge 已停止。')
         print('本地 Codex Bridge 已停止。')
