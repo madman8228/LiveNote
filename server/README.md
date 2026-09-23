@@ -19,7 +19,7 @@ python server/main.py
 - `LIVENOTE_MAX_CHUNK_BYTES`：单个 Chunk 最大字节数，默认 25 MB。
 - `LIVENOTE_UPLOAD_DURATION_TOLERANCE_MS`：整场时长与最后一个已上传 Chunk 的允许差值，默认 15 秒。
 - `LIVENOTE_CORS_ORIGINS`：逗号分隔的允许来源；默认允许本机 Vite HTTPS 地址。
-- `LIVENOTE_API_KEY`：设置后，`/api/v1/*` 请求必须携带 `X-API-Key`；不设置时保持本地开发兼容。
+- `LIVENOTE_API_KEY`：服务器端兼容/附加凭证。管理接口仍要求管理员会话或管理员令牌，设备接口仍要求配对设备凭证，Worker 接口仍要求 Worker 凭证；健康检查、登录/配对入口不要求该 Key。未按上述身份凭证保护的兼容接口仍要求 `X-API-Key`。不要将此 Key 写入 `VITE_*` 前端变量。
 - `LIVENOTE_ENV`：设置为 `production` 后，缺少 API Key 或 CORS 白名单会阻止服务启动。
 - `LIVENOTE_ADMIN_USERNAME` / `LIVENOTE_ADMIN_PASSWORD`：生产环境预先初始化 PC 管理控制台账号和密码；本地开发首次打开管理页时也可以直接完成初始化，账号哈希保存在 SQLite；旧版 `LIVENOTE_ADMIN_TOKEN` 可在迁移期间保留。
 
@@ -37,7 +37,7 @@ POST /api/v1/diagnostics
 multipart/form-data
 ```
 
-诊断资料保存到 `server/data/diagnostics/{diagnosticId}/`，默认单个文件最大 10 MB，可通过 `LIVENOTE_MAX_DIAGNOSTIC_BYTES` 调整。诊断快照只包含页面状态、错误、生命周期和 Session/Segment/Chunk 摘要，不包含录音 Blob；上传接口仍受 `LIVENOTE_API_KEY` 保护。
+诊断资料保存到 `server/data/diagnostics/{diagnosticId}/`，默认单个文件最大 10 MB，可通过 `LIVENOTE_MAX_DIAGNOSTIC_BYTES` 调整。诊断快照只包含页面状态、错误、生命周期和 Session/Segment/Chunk 摘要，不包含录音 Blob；生产环境上传接口要求管理员或配对设备凭证。
 
 ## M6 本地音频重建
 

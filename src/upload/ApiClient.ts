@@ -2,7 +2,6 @@ import type { ChunkRecord, MarkerRecord, SegmentRecord, SessionRecord } from '..
 import type { PlaybackDiagnosticsSink } from '../diagnostics/PlaybackDiagnostics'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
-const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) || ''
 const API_TIMEOUT_MS = Math.max(10_000, Number(import.meta.env.VITE_API_TIMEOUT_MS ?? 30_000) || 30_000)
 
 export class ApiRequestError extends Error {
@@ -227,7 +226,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
       : {}
   const response = await fetchWithTimeout(`${API_BASE}${path}`, {
     ...init,
-    headers: { Accept: 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}), ...identityHeaders, ...(init.headers ?? {}) },
+    headers: { Accept: 'application/json', ...identityHeaders, ...(init.headers ?? {}) },
   })
   if (!response.ok) {
     if ([401, 503].includes(response.status) && path.startsWith('/admin')) {
@@ -249,7 +248,7 @@ async function requestAdminBlob(path: string, init: RequestInit = {}): Promise<B
       : {}
   const response = await fetchWithTimeout(`${API_BASE}${path}`, {
     ...init,
-    headers: { Accept: 'audio/webm', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}), ...identityHeaders, ...(init.headers ?? {}) },
+    headers: { Accept: 'audio/webm', ...identityHeaders, ...(init.headers ?? {}) },
   })
   if (!response.ok) {
     if ([401, 503].includes(response.status)) {
@@ -266,7 +265,6 @@ async function requestWorkerJson<T>(path: string, workerToken: string, init: Req
     ...init,
     headers: {
       Accept: 'application/json',
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
       'X-Worker-Token': workerToken,
       ...(init.headers ?? {}),
     },
@@ -283,7 +281,6 @@ async function requestWorkerBlob(path: string, workerToken: string, init: Reques
     ...init,
     headers: {
       Accept: 'audio/webm',
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
       'X-Worker-Token': workerToken,
       ...(init.headers ?? {}),
     },
@@ -541,7 +538,6 @@ export const ApiClient = {
       const response = await fetchWithTimeout(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/audio`, {
         headers: {
           Accept: 'audio/webm',
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
           ...(deviceToken ? { Authorization: `Bearer ${deviceToken}` } : {}),
         },
       })
@@ -564,7 +560,6 @@ export const ApiClient = {
     const response = await fetchWithTimeout(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/segments/${encodeURIComponent(segmentId)}/audio`, {
       headers: {
         Accept: 'audio/webm',
-        ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
         ...(deviceToken ? { Authorization: `Bearer ${deviceToken}` } : {}),
       },
     })

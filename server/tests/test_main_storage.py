@@ -1159,15 +1159,36 @@ class MainStorageTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         previous_key = main.API_KEY
+        previous_admin = os.environ.get('LIVENOTE_ADMIN_TOKEN')
         main.API_KEY = 'test-api-key'
+        os.environ['LIVENOTE_ADMIN_TOKEN'] = 'test-admin-token'
         try:
             client = TestClient(main.app)
-            self.assertEqual(client.get('/api/v1/health').status_code, 401)
+            self.assertEqual(client.get('/api/v1/health').status_code, 200)
+            self.assertEqual(client.get('/api/v1/auth/admin/status').status_code, 200)
             authorized = client.get('/api/v1/health', headers={'X-API-Key': 'test-api-key'})
             self.assertEqual(authorized.status_code, 200)
             self.assertEqual(authorized.json()['storageSchema'], 9)
+
+            admin_without_token = client.get('/api/v1/admin/local-worker')
+            self.assertEqual(admin_without_token.status_code, 401)
+            admin_with_token = client.get('/api/v1/admin/local-worker', headers={'X-Admin-Token': 'test-admin-token'})
+            self.assertNotEqual(admin_with_token.status_code, 401, admin_with_token.text)
+
+            invalid_device = client.get('/api/v1/auth/me', headers={'Authorization': 'Bearer invalid-device-token'})
+            self.assertEqual(invalid_device.status_code, 401)
+            self.assertIn('设备凭证', invalid_device.json()['detail'])
+
+            legacy_without_key = client.get('/api/v1/sessions/missing/report')
+            self.assertEqual(legacy_without_key.status_code, 401)
+            legacy_with_key = client.get('/api/v1/sessions/missing/report', headers={'X-API-Key': 'test-api-key'})
+            self.assertEqual(legacy_with_key.status_code, 410)
         finally:
             main.API_KEY = previous_key
+            if previous_admin is None:
+                os.environ.pop('LIVENOTE_ADMIN_TOKEN', None)
+            else:
+                os.environ['LIVENOTE_ADMIN_TOKEN'] = previous_admin
 
     def test_latest_processing_job_can_be_restored_after_page_reload(self) -> None:
         main.DB_PATH = _ROOT / 'livenote.sqlite3'

@@ -583,7 +583,34 @@ app.add_middleware(
 async def api_key_middleware(request: Request, call_next):
     if API_KEY and request.url.path.startswith('/api/v1/'):
         provided = request.headers.get('x-api-key', '')
-        if not secrets.compare_digest(provided, API_KEY) and not has_valid_worker_token(request):
+        path = request.url.path
+        method = request.method.upper()
+        public_auth_routes = {
+            ('GET', '/api/v1/health'),
+            ('GET', '/api/v1/auth/admin/status'),
+            ('POST', '/api/v1/auth/admin/login'),
+            ('POST', '/api/v1/auth/admin/setup'),
+            ('POST', '/api/v1/auth/pair'),
+        }
+        admin_route = path.startswith('/api/v1/admin/')
+        device_route = (
+            path == '/api/v1/auth/me'
+            or path == '/api/v1/sessions'
+            or path.startswith('/api/v1/sessions/')
+        ) and not any(path.endswith(suffix) for suffix in (
+            '/transcribe', '/transcript', '/report', '/process', '/processing',
+        ))
+        has_device_credential = bool(bearer_token(request))
+        route_uses_credential_auth = (
+            (method, path) in public_auth_routes
+            or admin_route
+            or (device_route and has_device_credential)
+        )
+        if (
+            not secrets.compare_digest(provided, API_KEY)
+            and not has_valid_worker_token(request)
+            and not route_uses_credential_auth
+        ):
             return JSONResponse(status_code=401, content={'detail': '缺少有效 API Key'})
     return await call_next(request)
 

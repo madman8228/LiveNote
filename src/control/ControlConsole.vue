@@ -369,7 +369,7 @@ async function pullTaskToLocal(task: ProcessingTask): Promise<void> {
     await refresh()
     message.value = deferred
       ? `已领取：${task.title || '未命名会话'}。实时识别收尾后会自动继续处理。`
-      : `已领取并开始自动处理：${task.title || '未命名会话'}。完成后只需审核并发布。`
+      : `已领取并开始自动处理：${task.title || '未命名会话'}。完成后可发布。`
   } catch (cause) { error.value = controlError(cause, '领取或自动处理失败。') }
   finally { requestingTaskId.value = null }
 }
@@ -421,7 +421,7 @@ async function retryTask(task: ProcessingTask): Promise<void> {
 }
 async function regenerateSummary(task: ProcessingTask): Promise<void> {
   if (requestingTaskId.value) return
-  const confirmed = window.confirm(`要按新版规则重新生成“${task.title || '未命名会话'}”的总结吗？\n\n将使用已保存的识别文字调用本地 Codex，不会重新识别。旧版本和已发布内容会保留；新结果生成后需要重新审核。`)
+  const confirmed = window.confirm(`要按新版规则重新生成“${task.title || '未命名会话'}”的总结吗？\n\n将使用已保存的识别文字调用本地 Codex，不会重新识别。旧版本和已发布内容会保留；新结果生成后由你决定是否发布。`)
   if (!confirmed) return
   requestingTaskId.value = task.id; error.value = ''; message.value = ''
   try {
@@ -429,7 +429,7 @@ async function regenerateSummary(task: ProcessingTask): Promise<void> {
     await ApiClient.adminRegenerateSummary(task.id)
     if (selectedTaskId.value === task.id) closePreview()
     await refresh()
-    message.value = '已开始重新生成总结；旧版本和已发布内容保留，新结果生成后需重新审核。'
+    message.value = '已开始重新生成总结；旧版本和已发布内容保留，新结果生成后由你决定是否发布。'
   } catch (cause) { error.value = controlError(cause, '重新生成总结失败。') }
   finally { requestingTaskId.value = null }
 }
@@ -634,7 +634,7 @@ async function publishTask(task: ProcessingTask, revisionIdOverride: string | nu
     if (!revisionId) revisionId = (await ApiClient.adminTaskResults(task.id)).items[0]?.id ?? null
     if (!revisionId) throw new Error('没有可发布的总结草稿。')
     await ApiClient.adminPublish(task.id, revisionId)
-    message.value = '审核已通过，手机将在下一次刷新时拉取。'
+    message.value = '已发布，手机将在下一次刷新时拉取。'
     await refresh()
   } catch (cause) { error.value = controlError(cause, '发布失败。') }
   finally { publishingTaskId.value = null }
@@ -858,12 +858,12 @@ onBeforeUnmount(() => {
       <div v-else class="control-settings-primary control-admin-login">
         <label class="control-credential-field"><span>管理员账号</span><input v-model="adminUsername" type="text" autocomplete="username" placeholder="例如：admin" /></label>
         <label class="control-credential-field"><span>管理员密码</span><input v-model="adminPassword" type="password" autocomplete="current-password" placeholder="请输入管理员密码" @keyup.enter="loginAdminAndRefresh" /></label>
-        <div class="control-settings-actions"><button class="primary-button compact-button" type="button" :disabled="loading || !adminUsername.trim() || !adminPassword" @click="loginAdminAndRefresh">登录并验证</button><span class="control-settings-hint">密码不会保存在浏览器中</span></div>
+        <div class="control-settings-actions"><button class="primary-button compact-button" type="button" :disabled="loading || !adminUsername.trim() || !adminPassword" @click="loginAdminAndRefresh">登录并验证</button></div>
       </div>
       <details class="control-optional-settings">
         <summary>Worker 设置 <span>{{ localPullAvailable ? '本机模式' : '云端模式' }}</span></summary>
         <div class="control-optional-settings-body">
-           <div class="control-mode-summary"><strong>当前模式</strong><p v-if="storageOnly">ECS 存储模式：本地电脑运行 Worker 下载并识别，Codex Bridge 自动生成总结；此页面只负责查看、审核和发布。</p><p v-else-if="localPullAvailable">本机模式：任务可以直接保存到这台电脑，不需要填写 Worker 凭证。</p><p v-else>云端模式：需要 Worker 凭证，才能让这台电脑自动领取服务器上的任务。</p></div>
+        <div class="control-mode-summary"><strong>当前模式</strong><p v-if="storageOnly">ECS 存储模式：本地电脑运行 Worker 下载并识别，Codex Bridge 自动生成总结；此页面用于查看和发布。</p><p v-else-if="localPullAvailable">本机模式：任务可以直接保存到这台电脑，不需要填写 Worker 凭证。</p><p v-else>云端模式：需要 Worker 凭证，才能让这台电脑自动领取服务器上的任务。</p></div>
            <div v-if="!localPullAvailable && !storageOnly" class="control-browser-worker"><label><span>Worker 凭证 <em>云端必填</em></span><input v-model="workerToken" type="password" autocomplete="off" placeholder="粘贴服务器的 LIVENOTE_WORKER_TOKEN" @change="saveWorkerToken" /></label><div class="control-worker-actions"><button v-if="!browserWorkerRunning" class="primary-button compact-button" type="button" @click="startBrowserWorker">启动电脑自动领取</button><button v-else class="secondary-button compact-button" type="button" @click="stopBrowserWorker">停止电脑自动领取</button><span v-if="browserWorkerRunning" class="control-status control-status-processing">运行中</span></div><p v-if="browserWorkerMessage" class="control-message">{{ browserWorkerMessage }}</p><p v-if="browserWorkerError" class="control-error">{{ browserWorkerError }}</p></div>
         </div>
       </details>
@@ -874,8 +874,8 @@ onBeforeUnmount(() => {
         <div><h2>处理任务</h2><p>{{ visibleTasks.length }} 个符合筛选 · 共 {{ taskTotal || tasks.length }} 个任务</p></div>
         <div class="control-task-toolbar"><select v-model="taskFilter" class="control-task-filter" aria-label="任务筛选"><option value="ALL">全部记录</option><option value="ACTIONABLE">未完成</option><option value="READY">排队中</option><option value="PROCESSING">处理中</option><option value="TRANSCRIBED">待总结</option><option value="SUMMARIZING">总结中</option><option value="REVIEW">待发布</option><option value="FAILED">失败</option><option value="COMPLETED">历史记录</option></select><div class="control-flow"><span>自动识别</span><i>→</i><span>Codex 总结</span><i>→</i><span>发布</span></div></div>
       </div>
-       <details v-if="storageOnly" class="control-processing-guide"><summary>ECS 存储模式处理说明</summary><ol><li>本地 Worker 自动从 ECS 下载并校验 Chunk，无需手动指定任务。</li><li>本地 Whisper 完成识别后，本地 Codex Bridge 自动生成总结。</li><li>这里查看总结，确认无误后审核并发布。</li></ol></details>
-       <details v-else-if="!localPullAvailable" class="control-processing-guide"><summary>自动处理说明</summary><ol><li>任务进入队列后，本地 Worker 会自动领取，无需指定电脑。</li><li>Worker 完成识别后，Codex Bridge 会自动生成总结。</li><li>这里仅用于查看状态、审核和发布。</li></ol></details>
+       <details v-if="storageOnly" class="control-processing-guide"><summary>ECS 存储模式处理说明</summary><ol><li>本地 Worker 自动从 ECS 下载并校验 Chunk，无需手动指定任务。</li><li>本地 Whisper 完成识别后，本地 Codex Bridge 自动生成总结。</li><li>这里查看总结并发布到手机。</li></ol></details>
+       <details v-else-if="!localPullAvailable" class="control-processing-guide"><summary>自动处理说明</summary><ol><li>任务进入队列后，本地 Worker 会自动领取，无需指定电脑。</li><li>Worker 完成识别后，Codex Bridge 会自动生成总结。</li><li>这里查看状态并发布总结。</li></ol></details>
       <div v-if="visibleTasks.length" class="control-task-groups">
         <section v-for="group in taskGroups" :key="group.key" class="control-task-group">
           <header class="control-task-group-heading"><h3><button class="control-task-group-toggle" type="button" :aria-expanded="isTaskGroupExpanded(group.key)" :aria-controls="`task-group-${group.key}`" @click="toggleTaskGroup(group.key)"><span class="control-task-group-label"><svg class="control-task-group-chevron" :class="{ collapsed: !isTaskGroupExpanded(group.key) }" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg><span class="control-task-group-name">用户：{{ group.label }}</span></span><span class="control-task-group-count">{{ group.tasks.length }} 条任务<small>{{ isTaskGroupExpanded(group.key) ? '收起' : '展开' }}</small></span></button></h3></header>
@@ -892,7 +892,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-task-side">
             <div class="control-task-actions">
-              <span v-if="task.status === 'REVIEW'" class="control-review-action-wrap"><button class="primary-button compact-button control-review-action" type="button" :aria-describedby="`review-tip-${task.id}`" aria-label="审核并发布，手机将自动拉取" :disabled="publishingTaskId === task.id" @click="publishTask(task)">{{ publishingTaskId === task.id ? '确认中…' : '审核并发布' }}</button><span :id="`review-tip-${task.id}`" class="control-review-tooltip" role="tooltip">审核通过后，手机将自动拉取</span></span>
+              <button v-if="task.status === 'REVIEW'" class="primary-button compact-button" type="button" aria-label="发布到手机" :disabled="publishingTaskId === task.id" @click="publishTask(task)">{{ publishingTaskId === task.id ? '发布中…' : '发布' }}</button>
               <button v-if="['REVIEW', 'COMPLETED'].includes(task.status) && task.resultVersion > 0" class="secondary-button compact-button" type="button" :disabled="requestingTaskId !== null" @click="regenerateSummary(task)">{{ requestingTaskId === task.id ? '排队中…' : '重新生成总结' }}</button>
               <template v-if="localPullAvailable && ['READY', 'TRANSCRIBING', 'TRANSCRIBED', 'SUMMARIZING'].includes(task.status)">
                 <span v-if="task.status !== 'TRANSCRIBED'" class="control-task-auto-note">{{ taskStatusNote(task.status) }}</span>
@@ -910,8 +910,8 @@ onBeforeUnmount(() => {
               <section class="control-inline-preview">
                 <p v-if="!selectedRevisions.length" class="control-preview-loading">正在读取总结…</p>
                 <template v-if="selectedRevisions.length">
-                  <div v-if="selectedRevisions.length > 1" class="control-preview-toolbar"><label class="control-revision-select">版本<select v-model="selectedRevisionId"><option v-for="revision in selectedRevisions" :key="revision.id" :value="revision.id">v{{ revision.version }} · {{ new Date(revision.createdAt).toLocaleString() }}</option></select></label><span class="control-preview-toolbar-note">选择版本查看内容，确认无误后让手机拉取</span></div>
-                  <article class="control-readable-result"><h3>总结后的知识预览</h3><p v-if="resultText(selectedPreviewResult.overview)" class="control-readable-overview">{{ resultText(selectedPreviewResult.overview) }}</p><section v-if="resultKnowledgeStructure(selectedPreviewResult.knowledgeStructure).length" class="control-readable-section"><h4>知识结构</h4><div v-for="(section, index) in resultKnowledgeStructure(selectedPreviewResult.knowledgeStructure)" :key="`preview-structure-${index}`" class="control-readable-structure"><strong>{{ section.title }}</strong><ul class="control-readable-list"><li v-for="point in section.points" :key="point">{{ point }}</li></ul></div></section><section v-if="resultTextList(selectedPreviewResult.keyPoints).length" class="control-readable-section"><h4>关键知识点</h4><ul class="control-readable-list"><li v-for="point in resultTextList(selectedPreviewResult.keyPoints)" :key="point">{{ point }}</li></ul></section><section v-if="resultQuestions(selectedPreviewResult.questions).length" class="control-readable-section"><h4>重要问答</h4><div class="control-readable-questions"><p v-for="(item, index) in resultQuestions(selectedPreviewResult.questions)" :key="`preview-question-${index}`" class="control-readable-question"><strong v-if="item.question">问：</strong>{{ item.question }}<br v-if="item.question && item.answer" /><strong v-if="item.answer">答：</strong>{{ item.answer }}</p></div></section><section v-if="resultTextList(selectedPreviewResult.actionItems).length" class="control-readable-section"><h4>行动建议</h4><ul class="control-readable-list"><li v-for="item in resultTextList(selectedPreviewResult.actionItems)" :key="item">{{ item }}</li></ul></section><section class="control-readable-section control-readable-notes"><h4>发布前确认</h4><p>请先确认上方总结中的主题、知识点和行动建议与录音一致；确认无误后，点击任务行右侧“审核通过，待手机拉取”。</p><ul v-if="resultReviewNotes(selectedPreviewResult.confidenceNotes).length" class="control-readable-list"><li v-for="item in resultReviewNotes(selectedPreviewResult.confidenceNotes)" :key="item">{{ item }}</li></ul></section><p v-if="!resultText(selectedPreviewResult.overview) && !resultKnowledgeStructure(selectedPreviewResult.knowledgeStructure).length && !resultTextList(selectedPreviewResult.keyPoints).length && !resultQuestions(selectedPreviewResult.questions).length && !resultTextList(selectedPreviewResult.actionItems).length" class="empty-state">这份草稿没有可识别的正文内容。</p></article>
+                  <div v-if="selectedRevisions.length > 1" class="control-preview-toolbar"><label class="control-revision-select">版本<select v-model="selectedRevisionId"><option v-for="revision in selectedRevisions" :key="revision.id" :value="revision.id">v{{ revision.version }} · {{ new Date(revision.createdAt).toLocaleString() }}</option></select></label><span class="control-preview-toolbar-note">选择版本查看内容</span></div>
+                  <article class="control-readable-result"><h3>总结后的知识预览</h3><p v-if="resultText(selectedPreviewResult.overview)" class="control-readable-overview">{{ resultText(selectedPreviewResult.overview) }}</p><section v-if="resultKnowledgeStructure(selectedPreviewResult.knowledgeStructure).length" class="control-readable-section"><h4>知识结构</h4><div v-for="(section, index) in resultKnowledgeStructure(selectedPreviewResult.knowledgeStructure)" :key="`preview-structure-${index}`" class="control-readable-structure"><strong>{{ section.title }}</strong><ul class="control-readable-list"><li v-for="point in section.points" :key="point">{{ point }}</li></ul></div></section><section v-if="resultTextList(selectedPreviewResult.keyPoints).length" class="control-readable-section"><h4>关键知识点</h4><ul class="control-readable-list"><li v-for="point in resultTextList(selectedPreviewResult.keyPoints)" :key="point">{{ point }}</li></ul></section><section v-if="resultQuestions(selectedPreviewResult.questions).length" class="control-readable-section"><h4>重要问答</h4><div class="control-readable-questions"><p v-for="(item, index) in resultQuestions(selectedPreviewResult.questions)" :key="`preview-question-${index}`" class="control-readable-question"><strong v-if="item.question">问：</strong>{{ item.question }}<br v-if="item.question && item.answer" /><strong v-if="item.answer">答：</strong>{{ item.answer }}</p></div></section><section v-if="resultTextList(selectedPreviewResult.actionItems).length" class="control-readable-section"><h4>行动建议</h4><ul class="control-readable-list"><li v-for="item in resultTextList(selectedPreviewResult.actionItems)" :key="item">{{ item }}</li></ul></section><section class="control-readable-section control-readable-notes"><h4>内容提示</h4><ul v-if="resultReviewNotes(selectedPreviewResult.confidenceNotes).length" class="control-readable-list"><li v-for="item in resultReviewNotes(selectedPreviewResult.confidenceNotes)" :key="item">{{ item }}</li></ul></section><p v-if="!resultText(selectedPreviewResult.overview) && !resultKnowledgeStructure(selectedPreviewResult.knowledgeStructure).length && !resultTextList(selectedPreviewResult.keyPoints).length && !resultQuestions(selectedPreviewResult.questions).length && !resultTextList(selectedPreviewResult.actionItems).length" class="empty-state">这份草稿没有可识别的正文内容。</p></article>
                   <div class="control-audio-preview"><div class="control-audio-preview-heading"><span>原录音</span><button class="secondary-button compact-button" type="button" :disabled="originalAudioLoadingTaskId === task.id" @click="playOriginalAudio(task)">{{ originalAudioLoadingTaskId === task.id ? '准备中…' : originalAudioUrl && originalAudioTaskId === task.id ? '已准备' : '试听原录音' }}</button></div><audio v-if="originalAudioUrl && originalAudioTaskId === task.id" :src="originalAudioUrl" controls preload="metadata" @canplay="tryPlayOriginalAudio"></audio><p v-if="originalAudioError && originalAudioTaskId === task.id" class="control-audio-preview-error">{{ originalAudioError }}</p></div>
                 </template>
               </section>
