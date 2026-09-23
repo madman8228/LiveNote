@@ -1585,6 +1585,55 @@ class MainStorageTests(unittest.TestCase):
         self.assertEqual(segment['status'], 'COMPLETED')
         self.assertEqual(task['status'], 'READY')
 
+    def test_admin_task_list_orders_recordings_by_recording_time_newest_first(self) -> None:
+        from fastapi.testclient import TestClient
+
+        now = main.now_ms()
+        older_session_id = 'sort-older-recording'
+        newer_session_id = 'sort-newer-recording'
+        older_task_id = 'sort-older-task'
+        newer_task_id = 'sort-newer-task'
+        for session_id, title, started_at in (
+            (older_session_id, '旧录音', now - 60_000),
+            (newer_session_id, '新录音', now - 30_000),
+        ):
+            main.create_session(main.SessionPayload(
+                id=session_id,
+                title=title,
+                startedAt=started_at,
+                endedAt=started_at + 10_000,
+                status='COMPLETED',
+                durationMs=10_000,
+                createdAt=started_at,
+                updatedAt=started_at + 10_000,
+            ))
+        with main.connect() as connection:
+            connection.execute(
+                'INSERT INTO processing_tasks(id, session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                (older_task_id, older_session_id, 'READY', now - 20_000, now - 20_000),
+            )
+            connection.execute(
+                'INSERT INTO processing_tasks(id, session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                (newer_task_id, newer_session_id, 'READY', now - 10_000, now - 10_000),
+            )
+
+        previous_admin = os.environ.get('LIVENOTE_ADMIN_TOKEN')
+        os.environ['LIVENOTE_ADMIN_TOKEN'] = 'sort-admin-token'
+        try:
+            response = TestClient(main.app).get(
+                '/api/v1/admin/tasks',
+                headers={'X-Admin-Token': 'sort-admin-token'},
+                params={'status': 'ALL', 'limit': 200},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            task_ids = [item['id'] for item in response.json()['items']]
+            self.assertLess(task_ids.index(newer_task_id), task_ids.index(older_task_id))
+        finally:
+            if previous_admin is None:
+                os.environ.pop('LIVENOTE_ADMIN_TOKEN', None)
+            else:
+                os.environ['LIVENOTE_ADMIN_TOKEN'] = previous_admin
+
     def test_admin_task_list_reports_transcription_progress(self) -> None:
         from fastapi.testclient import TestClient
 

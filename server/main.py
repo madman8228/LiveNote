@@ -1199,7 +1199,7 @@ def admin_list_tasks(request: Request, status: str = 'ALL', offset: int = 0, lim
     with connect() as connection:
         total = connection.execute(f'SELECT COUNT(*) AS count FROM processing_tasks task {where}', parameters).fetchone()['count']
         rows = connection.execute(
-            f'''SELECT task.*, session.title, session.duration_ms, session.status AS session_status,
+            f'''SELECT task.*, session.title, session.started_at, session.duration_ms, session.status AS session_status,
                        session.owner_id AS owner_id,
                        user.display_name AS owner_name,
                        (SELECT COUNT(*)
@@ -1211,7 +1211,7 @@ def admin_list_tasks(request: Request, status: str = 'ALL', offset: int = 0, lim
                 FROM processing_tasks task
                 JOIN sessions session ON session.id = task.session_id
                 LEFT JOIN users user ON user.id = session.owner_id
-                {where} ORDER BY task.created_at ASC LIMIT ? OFFSET ?''',
+                {where} ORDER BY session.started_at DESC, task.created_at DESC LIMIT ? OFFSET ?''',
             (*parameters, limit, offset),
         ).fetchall()
     return {'items': [task_payload(row) for row in rows], 'total': total, 'offset': offset, 'limit': limit}
