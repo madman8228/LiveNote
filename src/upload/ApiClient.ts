@@ -515,6 +515,9 @@ export const ApiClient = {
   adminRetryTask(taskId: string) {
     return requestJson<{ ok: boolean; taskId: string; status: string }>(`/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' })
   },
+  adminRegenerateSummary(taskId: string) {
+    return requestJson<{ ok: boolean; taskId: string; status: string; transcriptionReused: boolean }>(`/admin/tasks/${encodeURIComponent(taskId)}/regenerate-summary`, { method: 'POST' })
+  },
   adminTaskResults(taskId: string) {
     return requestJson<{ taskId: string; sessionId: string; status: ProcessingTaskStatus; items: AdminResultRevision[] }>(`/admin/tasks/${encodeURIComponent(taskId)}/results`)
   },

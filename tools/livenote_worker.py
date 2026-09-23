@@ -40,7 +40,7 @@ POLL_SECONDS = max(60, int(os.environ.get('LIVENOTE_WORKER_POLL_SECONDS', '300')
 HEARTBEAT_SECONDS = max(60, int(os.environ.get('LIVENOTE_WORKER_HEARTBEAT_SECONDS', '300')))
 
 
-def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', next_poll_at: int | None = None, record_event: bool = True) -> None:
+def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', next_poll_at: int | None = None, record_event: bool = True, update_snapshot: bool = True) -> None:
     task_snapshot = None
     if task:
         task_snapshot = {
@@ -59,7 +59,7 @@ def report_worker(phase: str, message: str, task: dict[str, Any] | None = None, 
             'errorMessage': task.get('errorMessage'),
             'errorStage': task.get('errorStage'),
         }
-    update_status('worker', phase, message, task=task_snapshot, progress=progress, error=error, next_poll_at=next_poll_at, record_event=record_event)
+    update_status('worker', phase, message, task=task_snapshot, progress=progress, error=error, next_poll_at=next_poll_at, record_event=record_event, update_snapshot=update_snapshot)
 
 
 def request_json(server: str, path: str, method: str = 'GET', payload: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
@@ -301,13 +301,13 @@ def lease_heartbeat_loop(args: argparse.Namespace, task_id: str, lease: dict[str
             print(f'租约续期失败 {task_id}: {error}', file=sys.stderr)
 
 
-def storage_manifest(args: argparse.Namespace, task_id: str, task_dir: Path, claimed: dict[str, Any], lease: dict[str, Any]) -> dict[str, Any]:
+def storage_manifest(args: argparse.Namespace, task_id: str, task_dir: Path, claimed: dict[str, Any], lease: dict[str, Any], *, update_snapshot: bool = True) -> dict[str, Any]:
     headers = worker_headers(args.worker_id, lease['leaseToken'])
     manifest = request_json(args.server, f'/tasks/{urllib.parse.quote(task_id)}/manifest', extra_headers=headers)
     (task_dir / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     chunks = [chunk for segment in manifest.get('segments', []) for chunk in segment.get('chunks', [])]
     completed = 0
-    report_worker('downloading', f'正在下载 {len(chunks)} 个 Chunk。', claimed, {'current': completed, 'total': len(chunks), 'unit': 'Chunk'})
+    report_worker('downloading', f'正在下载 {len(chunks)} 个 Chunk。', claimed, {'current': completed, 'total': len(chunks), 'unit': 'Chunk'}, update_snapshot=update_snapshot)
     for segment in manifest.get('segments', []):
         for chunk in segment.get('chunks', []):
             destination = task_dir / 'chunks' / segment['id'] / f"{int(chunk['index']):06d}.bin"
@@ -318,7 +318,7 @@ def storage_manifest(args: argparse.Namespace, task_id: str, task_dir: Path, cla
             if not reusable:
                 download_file(args.server, chunk['downloadPath'], destination, headers, chunk['sha256'], int(chunk['size']))
             completed += 1
-            report_worker('downloading', f'正在下载 Chunk（{completed}/{len(chunks)}）。', claimed, {'current': completed, 'total': len(chunks), 'unit': 'Chunk'})
+            report_worker('downloading', f'正在下载 Chunk（{completed}/{len(chunks)}）。', claimed, {'current': completed, 'total': len(chunks), 'unit': 'Chunk'}, update_snapshot=update_snapshot)
     (task_dir / 'task.json').write_text(json.dumps(manifest.get('task', claimed), ensure_ascii=False, indent=2), encoding='utf-8')
     return manifest
 
@@ -454,26 +454,14 @@ def pull_tasks(args: argparse.Namespace) -> int:
     return 0 if pulled else 1
 
 
-def pull_storage_tasks(args: argparse.Namespace) -> int:
+def pull_storage_tasks(args: argparse.Namespace, *, update_snapshot: bool = True, limit: int | None = None) -> int:
     """Claim tasks and download raw Chunks for an ECS storage-only server."""
-    report_worker('checking', '正在查看 ECS 上的新任务。', record_event=False)
-    response = request_json(args.server, f'/tasks?status=ALL&limit={args.limit * 3}')
-    candidates = [task for task in response.get('tasks', []) if task.get('status') == 'READY' or (task.get('claimedBy') == args.worker_id and task.get('status') in {'CLAIMED', 'LOCAL_READY', 'PROCESSING'})]
-    tasks: list[dict[str, Any]] = []
-    for candidate in candidates:
-        if candidate.get('status') != 'READY':
-            local_task_path = args.inbox / candidate['id'] / 'task.json'
-            try:
-                local_task = json.loads(local_task_path.read_text(encoding='utf-8')) if local_task_path.is_file() else {}
-            except (OSError, json.JSONDecodeError):
-                local_task = {}
-            if local_task.get('status') == 'FAILED':
-                continue
-        tasks.append(candidate)
-        if len(tasks) >= args.limit:
-            break
+    task_limit = args.limit if limit is None else limit
+    report_worker('checking', '正在查看 ECS 上的新任务。', record_event=False, update_snapshot=update_snapshot)
+    response = request_json(args.server, f'/tasks?status=READY&limit={task_limit}')
+    tasks = response.get('tasks', [])
     if not tasks:
-        report_worker('waiting', '等待新的录音任务。', record_event=False)
+        report_worker('waiting', '等待新的录音任务。', record_event=False, update_snapshot=update_snapshot)
         return 0
     args.inbox.mkdir(parents=True, exist_ok=True)
     processed = 0
@@ -483,7 +471,7 @@ def pull_storage_tasks(args: argparse.Namespace) -> int:
         task_dir.mkdir(parents=True, exist_ok=True)
         lease: dict[str, Any] = {}
         try:
-            report_worker('claiming', '正在领取任务。', task)
+            report_worker('claiming', '正在领取任务。', task, update_snapshot=update_snapshot)
             lease_path = task_dir / 'lease.json'
             if task.get('claimedBy') == args.worker_id and lease_path.is_file():
                 lease = load_lease(task_dir)
@@ -493,18 +481,18 @@ def pull_storage_tasks(args: argparse.Namespace) -> int:
                 claimed = claimed_response['task']
                 lease = {'workerId': args.worker_id, 'leaseToken': claimed_response['leaseToken']}
                 lease_path.write_text(json.dumps(lease, ensure_ascii=False, indent=2), encoding='utf-8')
-            manifest = storage_manifest(args, task_id, task_dir, claimed, lease)
+            manifest = storage_manifest(args, task_id, task_dir, claimed, lease, update_snapshot=update_snapshot)
             total_chunks = sum(len(segment.get('chunks', [])) for segment in manifest.get('segments', []))
             headers = worker_headers(args.worker_id, lease['leaseToken'])
             if claimed.get('status') != 'LOCAL_READY':
                 updated = request_json(args.server, f'/tasks/{urllib.parse.quote(task_id)}/status', 'POST', {'status': 'LOCAL_READY', 'workerId': args.worker_id, 'leaseToken': lease['leaseToken']}, headers)
                 (task_dir / 'task.json').write_text(json.dumps(updated.get('task', manifest.get('task', claimed)), ensure_ascii=False, indent=2), encoding='utf-8')
                 claimed = updated.get('task', claimed)
-            report_worker('ready', '录音已下载，准备在本机处理。', claimed, {'current': total_chunks, 'total': total_chunks, 'unit': 'Chunk'})
+            report_worker('ready', '录音已下载，准备在本机处理。', claimed, {'current': total_chunks, 'total': total_chunks, 'unit': 'Chunk'}, update_snapshot=update_snapshot)
             print(f'已下载 Chunk：{task_id} -> {task_dir}')
             processed += 1
         except Exception as error:
-            report_worker('failed', '领取或下载失败。', task, error=str(error))
+            report_worker('failed', '领取或下载失败。', task, error=str(error), update_snapshot=update_snapshot)
             print(f'拉取失败 {task_id}: {error}', file=sys.stderr)
             try:
                 if lease.get('leaseToken'):
@@ -513,6 +501,24 @@ def pull_storage_tasks(args: argparse.Namespace) -> int:
             except Exception:
                 pass
     return processed
+
+
+def count_active_storage_tasks(inbox: Path) -> int:
+    """Count locally claimed tasks to keep the download buffer bounded."""
+    if not inbox.is_dir():
+        return 0
+    active = 0
+    for task_dir in inbox.iterdir():
+        task_path = task_dir / 'task.json'
+        if not task_dir.is_dir() or not task_path.is_file():
+            continue
+        try:
+            task = json.loads(task_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if task.get('status') in {'CLAIMED', 'LOCAL_READY', 'PROCESSING'}:
+            active += 1
+    return active
 
 
 def process_storage_task(args: argparse.Namespace, task_dir: Path) -> int:
@@ -577,7 +583,12 @@ def process_storage_task(args: argparse.Namespace, task_dir: Path) -> int:
         report_worker('reconstructing', f'正在拼接录音段（{segment_index}/{len(segments)}）。', task, {'current': segment_index, 'total': len(segments), 'unit': '录音段'})
     audio_path = reconstruct_session(runtime_data, session_id, segment_paths)
     source_hash, _ = file_sha256(audio_path)
-    transcript = transcribe_with_progress(args, task, audio_path)
+    prefetch_thread = start_storage_prefetch(args, task_dir)
+    try:
+        transcript = transcribe_with_progress(args, task, audio_path)
+    finally:
+        if prefetch_thread is not None:
+            prefetch_thread.join()
     transcript['sourceHash'] = source_hash
     transcript['remoteTaskId'] = task_id
     report_worker('uploading', '正在把识别结果回传 ECS。', task)
@@ -601,13 +612,45 @@ def process_storage_task(args: argparse.Namespace, task_dir: Path) -> int:
     return 1
 
 
+def start_storage_prefetch(args: argparse.Namespace, current_task_dir: Path) -> threading.Thread | None:
+    """Download at most one ready task while the current task is in Whisper."""
+    if count_active_storage_tasks(args.inbox) > 1:
+        return None
+
+    def prefetch() -> None:
+        try:
+            # Prefetch is deliberately bounded to one task. Task events are
+            # retained, but the active task's progress snapshot stays visible.
+            pull_storage_tasks(args, update_snapshot=False, limit=1)
+        except Exception as error:
+            print(f'预取下一条录音任务失败：{error}', file=sys.stderr)
+
+    thread = threading.Thread(target=prefetch, name='storage-task-prefetch', daemon=True)
+    thread.start()
+    return thread
+
+
 def process_storage_tasks(args: argparse.Namespace) -> int:
-    count = pull_storage_tasks(args)
+    # Keep no more than the current task plus one prefetched task in the inbox,
+    # including after a restart that resumes work from a previous run.
+    active_count = count_active_storage_tasks(args.inbox)
+    pull_limit = min(max(0, getattr(args, 'limit', 1)), 2 - active_count)
+    count = pull_storage_tasks(args, limit=pull_limit) if pull_limit else 0
     if not args.inbox.is_dir():
         return count
-    for task_dir in args.inbox.iterdir():
-        if not task_dir.is_dir() or not (task_dir / 'task.json').is_file() or not (task_dir / 'manifest.json').is_file():
-            continue
+    processed_dirs: set[Path] = set()
+    while True:
+        pending_dirs = [
+            task_dir for task_dir in args.inbox.iterdir()
+            if task_dir not in processed_dirs
+            and task_dir.is_dir()
+            and (task_dir / 'task.json').is_file()
+            and (task_dir / 'manifest.json').is_file()
+        ]
+        if not pending_dirs:
+            break
+        task_dir = pending_dirs[0]
+        processed_dirs.add(task_dir)
         heartbeat_stop = threading.Event()
         heartbeat_thread: threading.Thread | None = None
         try:

@@ -1795,6 +1795,59 @@ def admin_retry_task(task_id: str, request: Request) -> dict:
     return {'ok': True, 'taskId': task_id, 'status': 'TRANSCRIBED' if summary_retry else 'READY'}
 
 
+@app.post('/api/v1/admin/tasks/{task_id}/regenerate-summary')
+def admin_regenerate_summary(task_id: str, request: Request) -> dict:
+    """Queue a fresh summary from the saved transcript without rerunning ASR."""
+    require_admin(request)
+    validate_identifier(task_id, 'Task ID')
+    with connect() as connection:
+        task = connection.execute(
+            'SELECT id, session_id, status FROM processing_tasks WHERE id = ?',
+            (task_id,),
+        ).fetchone()
+        if task is None:
+            raise HTTPException(status_code=404, detail='任务不存在')
+        if task['status'] not in {'REVIEW', 'COMPLETED'}:
+            raise HTTPException(status_code=409, detail=f'任务当前不能重新生成总结：{task["status"]}')
+        run = connection.execute(
+            """SELECT id, generation FROM processing_runs
+               WHERE task_id = ? AND status = 'COMPLETED'
+               ORDER BY generation DESC LIMIT 1""",
+            (task_id,),
+        ).fetchone()
+        if run is None:
+            raise HTTPException(status_code=409, detail='没有完成的识别记录，无法重新生成总结')
+
+        transcript_path = DATA_DIR / 'processed' / 'sessions' / task['session_id'] / 'transcript.json'
+        try:
+            transcript = json.loads(transcript_path.read_text(encoding='utf-8'))
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=409, detail='已保存的识别文字不存在，无法重新生成总结') from error
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise HTTPException(status_code=409, detail='已保存的识别文字无法读取，请先检查识别结果') from error
+        if not isinstance(transcript, dict):
+            raise HTTPException(status_code=409, detail='已保存的识别文字格式无效，无法重新生成总结')
+
+        updated_at = now_ms()
+        result = connection.execute(
+            """UPDATE processing_tasks
+               SET status = 'TRANSCRIBED', error_message = '', error_stage = '', updated_at = ?
+               WHERE id = ? AND status IN ('REVIEW', 'COMPLETED')""",
+            (updated_at, task_id),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=409, detail='任务状态刚刚发生变化，请刷新后再试')
+        _audit(connection, 'admin', 'REGENERATE_SUMMARY', task_id, {
+            'previousStatus': task['status'],
+            'transcriptRunId': run['id'],
+            'transcriptGeneration': run['generation'],
+            'previousResultVersion': connection.execute(
+                'SELECT result_version FROM processing_tasks WHERE id = ?', (task_id,),
+            ).fetchone()['result_version'],
+        })
+    return {'ok': True, 'taskId': task_id, 'status': 'TRANSCRIBED', 'transcriptionReused': True}
+
+
 @app.post('/api/v1/admin/devices/{device_id}/revoke')
 def admin_revoke_device(device_id: str, request: Request) -> dict:
     require_admin(request)

@@ -27,8 +27,8 @@ def _events_path() -> Path:
     return RUNTIME_DIR / f'worker-events{suffix}.jsonl'
 
 
-def update_status(service: str, phase: str, message: str, *, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', summary: dict[str, Any] | None = None, next_poll_at: int | None = None, record_event: bool = True) -> None:
-    """Write a dashboard-safe status snapshot and optionally append a task event."""
+def update_status(service: str, phase: str, message: str, *, task: dict[str, Any] | None = None, progress: dict[str, Any] | None = None, error: str = '', summary: dict[str, Any] | None = None, next_poll_at: int | None = None, record_event: bool = True, update_snapshot: bool = True) -> None:
+    """Optionally update the service snapshot and append a task event."""
     now = int(time.time() * 1000)
     snapshot: dict[str, Any] = {
         'service': service,
@@ -51,10 +51,11 @@ def update_status(service: str, phase: str, message: str, *, task: dict[str, Any
     try:
         with _lock:
             RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-            target = _status_path(service)
-            temporary = target.with_suffix(target.suffix + '.part')
-            temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding='utf-8')
-            temporary.replace(target)
+            if update_snapshot:
+                target = _status_path(service)
+                temporary = target.with_suffix(target.suffix + '.part')
+                temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding='utf-8')
+                temporary.replace(target)
             if record_event and task and (task.get('id') or task.get('taskId')):
                 with _events_path().open('a', encoding='utf-8') as output:
                     output.write(json.dumps(snapshot, ensure_ascii=False) + '\n')

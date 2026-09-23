@@ -419,6 +419,20 @@ async function retryTask(task: ProcessingTask): Promise<void> {
   } catch (cause) { error.value = controlError(cause, '重试任务失败。') }
   finally { requestingTaskId.value = null }
 }
+async function regenerateSummary(task: ProcessingTask): Promise<void> {
+  if (requestingTaskId.value) return
+  const confirmed = window.confirm(`要按新版规则重新生成“${task.title || '未命名会话'}”的总结吗？\n\n将使用已保存的识别文字调用本地 Codex，不会重新识别。旧版本和已发布内容会保留；新结果生成后需要重新审核。`)
+  if (!confirmed) return
+  requestingTaskId.value = task.id; error.value = ''; message.value = ''
+  try {
+    ApiClient.setAdminToken(adminToken.value)
+    await ApiClient.adminRegenerateSummary(task.id)
+    if (selectedTaskId.value === task.id) closePreview()
+    await refresh()
+    message.value = '已开始重新生成总结；旧版本和已发布内容保留，新结果生成后需重新审核。'
+  } catch (cause) { error.value = controlError(cause, '重新生成总结失败。') }
+  finally { requestingTaskId.value = null }
+}
 async function writeWorkerFile(directory: WorkerDirectoryHandle, name: string, content: Blob | string): Promise<void> {
   const file = await directory.getFileHandle(name, { create: true })
   const writable = await file.createWritable()
@@ -770,11 +784,9 @@ function summaryPrompt(task: ProcessingTask): string {
     `录音时间：${recordedAt}`,
     `录音时长：${formatDuration(task.durationMs)}`,
     '',
-    '请读取这条任务对应的已完成逐字稿，提取并整理：',
-    '1. 主题',
-    '2. 关键知识点',
-    '3. 重要问答',
-    '4. 行动建议',
+    '先识别对话场景（例如 AI 项目/商业讨论，或寻医问药/偏方交流），再选择合适的知识结构，不要把所有内容套成医患问答。',
+    '按原顺序逐段整理连续发言，尽量保持说话人标记一致，保留具体事实、数字、条件、做法、回应关系和不同意见；只删口头填充与重复，不删独有细节。不能确定是不是同一人时不要强行合并。',
+    '用一两句话概括全场，并提炼少量重点；这些概述不能代替按发言脉络整理的详细结构。健康内容必须区分大夫说法、用户经历和未经证实的偏方；不清楚的内容明确标注，不要猜。',
     '',
     '不要读取或总结其他会话。完成后将总结结果回填到对应的 LiveNote 任务。',
   ].join('\n')
@@ -793,7 +805,7 @@ async function copySummaryPrompt(task: ProcessingTask): Promise<void> {
   }
 }
 function canPreviewTask(task: ProcessingTask): boolean {
-  return ['REVIEW', 'COMPLETED'].includes(task.status)
+  return ['REVIEW', 'COMPLETED'].includes(task.status) || task.resultVersion > 0
 }
 function canViewTranscript(task: ProcessingTask): boolean {
   return ['TRANSCRIBED', 'SUMMARIZING', 'REVIEW', 'COMPLETED'].includes(task.status)
@@ -881,6 +893,7 @@ onBeforeUnmount(() => {
           <div class="control-task-side">
             <div class="control-task-actions">
               <span v-if="task.status === 'REVIEW'" class="control-review-action-wrap"><button class="primary-button compact-button control-review-action" type="button" :aria-describedby="`review-tip-${task.id}`" aria-label="审核并发布，手机将自动拉取" :disabled="publishingTaskId === task.id" @click="publishTask(task)">{{ publishingTaskId === task.id ? '确认中…' : '审核并发布' }}</button><span :id="`review-tip-${task.id}`" class="control-review-tooltip" role="tooltip">审核通过后，手机将自动拉取</span></span>
+              <button v-if="['REVIEW', 'COMPLETED'].includes(task.status) && task.resultVersion > 0" class="secondary-button compact-button" type="button" :disabled="requestingTaskId !== null" @click="regenerateSummary(task)">{{ requestingTaskId === task.id ? '排队中…' : '重新生成总结' }}</button>
               <template v-if="localPullAvailable && ['READY', 'TRANSCRIBING', 'TRANSCRIBED', 'SUMMARIZING'].includes(task.status)">
                 <span v-if="task.status !== 'TRANSCRIBED'" class="control-task-auto-note">{{ taskStatusNote(task.status) }}</span>
                 <button v-if="task.status === 'TRANSCRIBED'" class="primary-button compact-button" type="button" :aria-label="summaryPromptTaskId === task.id ? '已复制总结指令，请在 Codex 粘贴并发送' : '复制总结指令到 Codex'" :title="summaryPromptTaskId === task.id ? '已复制，请在 Codex 粘贴并发送' : '下一步：复制指令到 Codex'" :disabled="summaryPromptBusyTaskId === task.id" @click="copySummaryPrompt(task)">{{ summaryPromptBusyTaskId === task.id ? '复制中…' : summaryPromptTaskId === task.id ? '已复制，去 Codex 发送' : '复制总结指令' }}</button>

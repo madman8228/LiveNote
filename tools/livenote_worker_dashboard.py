@@ -131,10 +131,16 @@ def _server_status(cache_key: str, url: str, api_key: str, source_id: str, onlin
 
 
 def local_server_status() -> dict:
-    return _server_status(
+    value = _server_status(
         'local', LOCAL_SERVER_URL, LOCAL_API_KEY, 'local-server',
         '本地 Server 运行正常', '本地 Server 未运行', LOCAL_SERVER_CACHE_MS,
     )
+    address = LOCAL_SERVER_URL
+    if address.endswith('/api/v1'):
+        address = address[:-len('/api/v1')]
+    value['address'] = address
+    value['addressLink'] = f'{address}/health' if address else ''
+    return value
 
 
 def server_status() -> dict:
@@ -420,7 +426,14 @@ def recent_events(limit: int = 40) -> list[dict]:
                 sync_error = summary_sync_error(record['taskId'])
                 if sync_error:
                     record['summarySyncError'] = sync_error
-    return sorted(records.values(), key=lambda record: record.get('updatedAt', 0), reverse=True)[:limit]
+    def task_created_at(record: dict) -> int:
+        task = record.get('task') if isinstance(record.get('task'), dict) else {}
+        try:
+            return int(record.get('createdAt') or task.get('createdAt') or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return sorted(records.values(), key=task_created_at, reverse=True)[:limit]
 
 
 def tail_log(name: str, limit: int = 80) -> list[str]:

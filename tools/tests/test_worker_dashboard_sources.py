@@ -64,6 +64,8 @@ class WorkerDashboardSourceTests(unittest.TestCase):
         self.assertTrue(local['online'])
         self.assertEqual(local['sourceId'], 'local-server')
         self.assertEqual(local['message'], '本地 Server 运行正常')
+        self.assertEqual(local['address'], 'http://127.0.0.1:8000')
+        self.assertEqual(local['addressLink'], 'http://127.0.0.1:8000/health')
         self.assertTrue(ecs['online'])
         self.assertEqual(ecs['sourceId'], 'ecs')
         self.assertEqual(ecs['message'], 'ECS 连接正常')

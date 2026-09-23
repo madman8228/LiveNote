@@ -9,7 +9,7 @@ Use this skill when a LiveNote transcript comes from a Chinese livestream in whi
 
 ## Intended result
 
-Produce a short, readable summary for ordinary older adults. Keep the wording close to everyday spoken Chinese, remove repetition, and preserve the meaning of the original exchange. The output is an organized record of what people said, not a medical diagnosis or a recommendation to try a remedy.
+Produce a readable, reasonably detailed account for ordinary older adults. Keep the wording close to everyday spoken Chinese and remove filler or exact repetition, but preserve distinctive facts, examples, numbers, conditions, decisions, disagreements, and who said them. The output is an organized record of what people said, not a medical diagnosis or a recommendation to try a remedy.
 
 ## Non-negotiable safety and attribution rules
 
@@ -36,11 +36,29 @@ Keep the existing LiveNote result shape so the product can store and display it:
 
 - `title`: a short, concrete title; do not mention the source format.
 - `overview`: one or two plain-language sentences answering what this exchange was mainly about.
-- `knowledgeStructure`: use simple section titles such as “问了什么”“大夫怎么说”“有人分享的办法”. Put each claim under the correct speaker or source.
+- `knowledgeStructure`: organize by the identified scene and dialogue flow. For health Q&A, simple section titles may include “问了什么”“大夫怎么说”“有人分享的办法”; keep each claim under the correct speaker or source.
 - `keyPoints`: the few points an older reader should remember. Include attribution when a point could be mistaken for medical fact.
 - `questions`: preserve the caller's question and the answer when both are clear. Do not invent an answer.
 - `actionItems`: only safe, source-supported next steps. Do not convert an unverified remedy into an instruction.
 - `confidenceNotes`: record unclear words, missing context, conflicting statements, and medical-risk cautions. Omit generic “请复核” filler.
+
+## Identify the conversation before structuring it
+
+Do not assume every livestream is a medical Q&A. First infer the scene from the transcript, then choose a fitting structure:
+
+- **AI application, project, or business livestream:** capture the concrete project or opportunity, needs and use cases, proposed AI solution and implementation, business arrangements, constraints, decisions, next steps, and unresolved questions when present. Do not force caller/doctor sections or invent business details.
+- **Health Q&A or folk-remedy livestream:** preserve each questioner's symptoms or question, the practitioner's response, any remedy or experience shared by a caller or guest, and relevant cautions, keeping the source attached to each claim.
+- **Other, mixed, or unclear scene:** use the actual conversation flow and supported topics. Do not force either template; mark uncertainty where needed.
+
+## Preserve the dialogue flow and speaker continuity
+
+- Organize `knowledgeStructure` in the original order of substantive, continuous speaking turns, rather than replacing the conversation with only a whole-session thematic essay. A point should retain the speaker's main statement, concrete details, and any response or follow-up that belongs to that turn.
+- Keep adjacent utterances together when they are part of one uninterrupted turn. If a speaker returns after someone else speaks, record a separate turn and connect it to the same speaker only when the transcript supports that match.
+- Use speaker labels or diarization metadata already present in the transcript. Otherwise infer roles or recurring speakers only from clear conversational cues; use neutral labels such as “主播”“嘉宾”“发言者 A” only when distinguishable. Never invent names, identities, or certainty. If unsure whether two turns belong to the same person, say so or keep the speaker unspecified.
+- Preserve timestamps for questions when available, and include turn times in the structure when useful and supported by transcript timestamps.
+- A brief `overview` and a few `keyPoints` may orient the reader, but must not replace the more detailed chronological dialogue record. Remove filler and redundant restatement, not unique content.
+
+When the transcript is mostly unintelligible, fragmented, or too sparse to establish a topic, leave `keyPoints` and `knowledgeStructure` empty. Do not turn isolated words or numbers, or the lack of context itself, into knowledge points. Use `title`, `overview`, and `confidenceNotes` to state only what can be confirmed and what remains unclear. Fill those sections only when the transcript contains clear, supportable information.
 
 Prefer fewer, useful points over a comprehensive academic outline. If the exchange contains several callers, keep each caller's question and answer together instead of merging them by medical topic.
 
