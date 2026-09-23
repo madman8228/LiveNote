@@ -343,6 +343,9 @@ export const ApiClient = {
   getCurrentDevice() {
     return requestJson<{ device: { id: string; userId: string }; user: { id: string; displayName: string; status: string } }>('/auth/me')
   },
+  logoutDevice() {
+    return requestJson<{ ok: boolean }>('/auth/logout', { method: 'POST' })
+  },
   checkHealth() {
     return requestJson<HealthResponse>('/health')
   },

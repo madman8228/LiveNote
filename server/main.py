@@ -595,6 +595,8 @@ async def api_key_middleware(request: Request, call_next):
         admin_route = path.startswith('/api/v1/admin/')
         device_route = (
             path == '/api/v1/auth/me'
+            or path == '/api/v1/auth/logout'
+            or path == '/api/v1/diagnostics'
             or path == '/api/v1/sessions'
             or path.startswith('/api/v1/sessions/')
         ) and not any(path.endswith(suffix) for suffix in (
@@ -723,6 +725,17 @@ def device_me(request: Request) -> dict:
         normalize_stale_sessions(connection)
         user = connection.execute('SELECT id, display_name, status FROM users WHERE id = ?', (device['user_id'],)).fetchone()
     return {'device': {'id': device['id'], 'userId': device['user_id']}, 'user': {'id': user['id'], 'displayName': user['display_name'], 'status': user['status']}}
+
+
+@app.post('/api/v1/auth/logout')
+def device_logout(request: Request) -> dict:
+    with connect() as connection:
+        device = authenticate_device(connection, request)
+        connection.execute(
+            'UPDATE devices SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?',
+            (now_ms(), device['id']),
+        )
+    return {'ok': True}
 
 
 @app.get('/api/v1/sessions')

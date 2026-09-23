@@ -166,6 +166,7 @@ const deviceIdentity = ref<{ deviceId: string; userId: string; displayName: stri
 const deviceIdentityResolved = ref(false)
 const pairingMessage = ref('')
 const pairingBusy = ref(false)
+const deviceLogoutBusy = ref(false)
 let sessionUploadRefreshToken = 0
 
 function readAutoUploadSetting(): boolean {
@@ -393,6 +394,25 @@ async function pairCurrentDevice(): Promise<void> {
     pairingMessage.value = error instanceof Error ? error.message : '设备绑定失败。'
   } finally {
     pairingBusy.value = false
+  }
+}
+
+async function logoutCurrentDevice(): Promise<void> {
+  if (!deviceIdentity.value || deviceLogoutBusy.value || isRecording.value || isBusy.value) return
+  deviceLogoutBusy.value = true
+  pairingMessage.value = ''
+  try {
+    await ApiClient.logoutDevice()
+    ApiClient.clearDeviceToken()
+    deviceIdentity.value = null
+    pairingMessage.value = '已退出此设备；本机录音仍保留。再次使用需要重新配对。'
+  } catch (error) {
+    pairingMessage.value = error instanceof Error
+      ? `退出失败，服务器未确认；请检查网络后重试。本机录音未受影响。${error.message}`
+      : '退出失败，服务器未确认；请检查网络后重试。本机录音未受影响。'
+    errorMessage.value = pairingMessage.value
+  } finally {
+    deviceLogoutBusy.value = false
   }
 }
 
@@ -2134,7 +2154,8 @@ onBeforeUnmount(() => { pwaInstallManager.stop(); unsubscribePwaInstall(); windo
       <section class="identity-pairing-panel" aria-labelledby="identity-pairing-title"><div class="identity-pairing-heading"><h2 id="identity-pairing-title">手机身份</h2><span>未绑定</span></div><div class="identity-pairing-body"><div class="pairing-form"><div class="pairing-fields"><label>6位配对码<input v-model="pairingCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="输入6位配对码" /></label><label>浏览器名称<input v-model="pairingLabel" maxlength="120" autocomplete="off" placeholder="例如：我的手机" /></label></div><button class="primary-button identity-pair-button" type="button" :disabled="pairingBusy || pairingCode.length < 6" @click="pairCurrentDevice">{{ pairingBusy ? '绑定中…' : '绑定手机' }}</button><p class="settings-help">未完成配对前不能录音或上传</p><p v-if="pairingMessage" class="settings-help">{{ pairingMessage }}</p></div></div></section>
     </section>
     <section v-else class="app-view settings-view" aria-label="设置页面">
-      <details class="settings-group"><summary>手机身份 <span>{{ deviceIdentity?.displayName || '未绑定' }}</span></summary><div class="settings-group-body"><div v-if="deviceIdentity" class="settings-status-list"><div><span>当前用户</span><strong>{{ deviceIdentity.displayName }}</strong></div><div><span>设备 ID</span><code>{{ deviceIdentity.deviceId }}</code></div></div><div v-else class="pairing-form"><p class="settings-help">由电脑控制台生成 6 位配对码，在这里绑定一次。未完成配对前不能录音或上传。</p><div class="settings-action-row"><input v-model="pairingCode" inputmode="numeric" maxlength="6" placeholder="6 位配对码" /><input v-model="pairingLabel" maxlength="120" placeholder="设备名称" /><button class="primary-button compact-button" type="button" :disabled="pairingBusy || pairingCode.length < 6" @click="pairCurrentDevice">{{ pairingBusy ? '绑定中…' : '绑定手机' }}</button></div><p v-if="pairingMessage" class="settings-help">{{ pairingMessage }}</p></div></div></details>
+      <div v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</div>
+      <details class="settings-group"><summary>手机身份 <span>{{ deviceIdentity?.displayName || '未绑定' }}</span></summary><div class="settings-group-body"><div v-if="deviceIdentity"><div class="settings-status-list"><div><span>当前用户</span><strong>{{ deviceIdentity.displayName }}</strong></div><div><span>设备 ID</span><code>{{ deviceIdentity.deviceId }}</code></div></div><div class="settings-action-row device-logout-row"><button class="text-button" type="button" :disabled="deviceLogoutBusy || isRecording || isBusy" @click="logoutCurrentDevice">{{ deviceLogoutBusy ? '正在退出…' : '退出此设备' }}</button><span class="settings-help">退出不会删除本机录音；再次使用需要重新配对。</span></div></div><div v-else class="pairing-form"><p class="settings-help">由电脑控制台生成 6 位配对码，在这里绑定一次。未完成配对前不能录音或上传。</p><div class="settings-action-row"><input v-model="pairingCode" inputmode="numeric" maxlength="6" placeholder="6 位配对码" /><input v-model="pairingLabel" maxlength="120" placeholder="设备名称" /><button class="primary-button compact-button" type="button" :disabled="pairingBusy || pairingCode.length < 6" @click="pairCurrentDevice">{{ pairingBusy ? '绑定中…' : '绑定手机' }}</button></div><p v-if="pairingMessage" class="settings-help">{{ pairingMessage }}</p></div></div></details>
       <details class="settings-group"><summary>自动上传 <span :class="autoUploadEnabled ? 'status-good' : 'status-warn'">{{ autoUploadEnabled ? '已开启' : '已关闭' }}</span></summary><div class="settings-group-body"><div class="settings-action-row"><div><strong>{{ autoUploadEnabled ? '录音保存后自动上传' : '仅保存到手机本地' }}</strong><p>{{ autoUploadEnabled ? '录音保存后会自动上传到电脑端处理。' : '关闭后不会自动上传，已保存的录音不会丢失；重新开启后会继续上传。' }}</p></div><button class="secondary-button" type="button" @click="setAutoUploadEnabled(!autoUploadEnabled)">{{ autoUploadEnabled ? '关闭' : '开启' }}</button></div></div></details>
       <details class="settings-group pwa-settings-group"><summary>安装 LiveNote <span>{{ pwaStatusLabel }}</span></summary><div class="settings-group-body"><p class="settings-help">安装后的 PWA 会从手机主屏幕独立打开。它不会改变录音权限，也不会让网页获得原生后台录音能力。</p><button v-if="pwaSnapshot.status === 'prompt'" class="primary-button" type="button" @click="installPwa">安装到主屏幕</button><ol v-else class="pwa-install-steps"><li>确认当前使用 HTTPS 地址。</li><li>打开 Android Chrome 右上角菜单。</li><li>选择“安装应用”或“添加到主屏幕”。</li><li>从手机主屏幕重新打开 LiveNote；页面会显示“已安装并正在使用”。</li></ol><p v-if="pwaSnapshot.status === 'unavailable'" class="settings-help">当前开发环境未注册生产 Service Worker，不能把开发页当作完整 PWA 验收。正式构建部署后再测试安装。</p></div></details>
       <details class="settings-group"><summary>录音设置 <span>{{ selectedProfileDetails.name }}</span></summary><div class="settings-group-body"><div v-if="!comparisonMode" class="profile-selector" role="radiogroup" aria-label="默认录音配置"><button v-for="profile in AUDIO_PROFILES" :key="profile.id" class="profile-option" :class="[`profile-option-${profile.id}`, { selected: selectedProfile === profile.id }]" type="button" :aria-checked="selectedProfile === profile.id" role="radio" :disabled="isRecording || isBusy" @click="selectedProfile = profile.id"><span class="profile-radio"></span><span><strong>{{ profile.name }}</strong><small>{{ profile.description }}</small></span></button></div><p class="settings-help">MIME 类型由浏览器自动选择；当前默认建议使用 Speech。实际输入设置以浏览器返回值为准。</p></div></details>

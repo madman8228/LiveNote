@@ -1190,6 +1190,48 @@ class MainStorageTests(unittest.TestCase):
             else:
                 os.environ['LIVENOTE_ADMIN_TOKEN'] = previous_admin
 
+    def test_paired_device_can_upload_diagnostics_and_revoke_its_own_token(self) -> None:
+        from fastapi.testclient import TestClient
+
+        previous_key = main.API_KEY
+        previous_runtime_env = main.RUNTIME_ENV
+        previous_admin = os.environ.get('LIVENOTE_ADMIN_TOKEN')
+        main.API_KEY = 'device-diagnostics-test-key'
+        main.RUNTIME_ENV = 'production'
+        os.environ['LIVENOTE_ADMIN_TOKEN'] = 'device-diagnostics-admin-token'
+        try:
+            client = TestClient(main.app)
+            admin_headers = {'X-Admin-Token': 'device-diagnostics-admin-token'}
+            user = client.post('/api/v1/admin/users', headers=admin_headers, json={'displayName': '诊断上传测试用户'})
+            self.assertEqual(user.status_code, 200, user.text)
+            user_id = user.json()['id']
+            pairing = client.post(f'/api/v1/admin/users/{user_id}/pairing-codes', headers=admin_headers, json={})
+            self.assertEqual(pairing.status_code, 200, pairing.text)
+            paired = client.post('/api/v1/auth/pair', json={'code': pairing.json()['code'], 'label': 'diagnostic test device'})
+            self.assertEqual(paired.status_code, 200, paired.text)
+            device_headers = {'Authorization': f"Bearer {paired.json()['token']}"}
+
+            diagnostic = client.post(
+                '/api/v1/diagnostics',
+                headers=device_headers,
+                data={'description': 'device diagnostic test'},
+                files={'snapshot': ('snapshot.json', b'{"kind":"test"}', 'application/json')},
+            )
+            self.assertEqual(diagnostic.status_code, 200, diagnostic.text)
+
+            logged_out = client.post('/api/v1/auth/logout', headers=device_headers)
+            self.assertEqual(logged_out.status_code, 200, logged_out.text)
+            current_device = client.get('/api/v1/auth/me', headers=device_headers)
+            self.assertEqual(current_device.status_code, 401)
+            self.assertIn('设备凭证无效或已撤销', current_device.json()['detail'])
+        finally:
+            main.API_KEY = previous_key
+            main.RUNTIME_ENV = previous_runtime_env
+            if previous_admin is None:
+                os.environ.pop('LIVENOTE_ADMIN_TOKEN', None)
+            else:
+                os.environ['LIVENOTE_ADMIN_TOKEN'] = previous_admin
+
     def test_latest_processing_job_can_be_restored_after_page_reload(self) -> None:
         main.DB_PATH = _ROOT / 'livenote.sqlite3'
         main.DATA_DIR = _ROOT / 'data'
